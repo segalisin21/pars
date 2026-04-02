@@ -9,6 +9,7 @@ from app.db import Base
 from app.models import CollectRun, InviteRun
 from app.services import run_collect, run_invite
 from app.telegram_client import TelegramClient
+from app.telethon_client import TelethonTelegramClient
 
 
 def _get_session_factory() -> sessionmaker[Session]:
@@ -21,16 +22,20 @@ def _get_session_factory() -> sessionmaker[Session]:
 
 
 def _get_tg_client() -> TelegramClient:
-    # v1: Telegram integration is not wired in worker yet.
-    # We keep this as a noop client so the queue pipeline works end-to-end.
-    class _NoopTelegramClient(TelegramClient):
-        def get_participants(self, source_identifier: str):
-            return []
+    # In Railway worker we expect a real Telegram session.
+    # If env vars are missing, fall back to a noop client to keep jobs from crashing,
+    # but collection will return 0 participants.
+    try:
+        return TelethonTelegramClient.from_env()
+    except Exception:
+        class _NoopTelegramClient(TelegramClient):
+            def get_participants(self, source_identifier: str):
+                return []
 
-        def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
-            return None
+            def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
+                return None
 
-    return _NoopTelegramClient()
+        return _NoopTelegramClient()
 
 
 def execute_collect_run(*, run_id: int) -> None:

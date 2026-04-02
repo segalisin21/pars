@@ -402,3 +402,23 @@ pytest tests/ -v --tb=short
 ```bash
 pytest tests/ -v --tb=short
 ```
+
+
+## 2026-04-02 (feat: Telethon worker client)
+
+### What changed
+
+- Added a real Telegram implementation for the Railway `worker` using Telethon + `TG_SESSION_STRING`:
+  - `app/telethon_client.py` implements `TelegramClient` via Telethon (`get_participants`, `invite_to_target`).
+  - `app/worker_jobs.py` now uses `TelethonTelegramClient.from_env()` when Telegram env vars are present (otherwise it falls back to noop and collect will return 0).
+
+### Key files
+
+- `app/telethon_client.py`
+- `app/worker_jobs.py`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
