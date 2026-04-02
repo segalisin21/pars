@@ -8,6 +8,45 @@
 
 ---
 
+## Full code review (2026-04-02) — office / parallel roles
+
+**Command:** `pytest tests/ -v --tb=short` → **14 passed** (current tree).
+
+**Summary**
+
+| Area | Finding | Severity |
+|---|---|---|
+| Tests | Core flows covered: health, sources/targets, collect/invite with fake TG, read filters, audit side effects | Good |
+| Auth | Write routes use `verify_admin_token`; `GET` lists/runs/candidates often **without** auth — document as acceptable only for private networks | Medium (ops) |
+| Worker | `execute_*_run` returns early if `status != "queued"`; aligns with idempotency expectations | Pass |
+| Invite | `process_invite_run` pauses on `FloodWaitError` and enforces pacing windows | Pass (reconcile with any old BUG-002 text in docs) |
+| SaaS readiness | No multi-tenant or per-user tests; adding `workspace_id` will require migration + regression tests | N/A (future) |
+
+**Recommended follow-ups (test backlog)**
+
+- Authenticated `401` / `200` matrix with `ADMIN_TOKEN` set in env.
+- `GET /collect-runs/{id}` 404 path.
+- Optional: CORS header smoke if `CORS_ALLOWED_ORIGINS` is set in tests.
+
+---
+
+## Operator UI smoke (`ui/`) — 2026-04-02
+
+**Build / lint:** `cd ui && npm run lint && npm run build` (manual; not part of pytest).
+
+| # | Check | Notes |
+|---|---|---|
+| U-01 | Shell: группы навигации, индикатор API на десктопе и в моб. шапке | `App.tsx` |
+| U-02 | Мобильное меню: открытие/закрытие, backdrop | ≤900px |
+| U-03 | `Collect` / `Invite`: polling при `queued`/`running` | интервал 3s |
+| U-04 | Deep links `/collect/:runId`, `/invite/:runId` | детальный блок + ссылки из таблицы |
+| U-05 | Ошибки API: `ApiRequestError` + код в баннере, «Повторить» | `formatError.ts` |
+| U-06 | Контакты: маска TG ID в списке и drawer | `maskId.ts` |
+| U-07 | Telegram вход: предупреждение не хранить session в localStorage | `UiBanner` info |
+| U-08 | Все страницы: `PageLayout`, skeleton loading, empty states | — |
+
+---
+
 ## What Was Tested
 
 | Area | Method |

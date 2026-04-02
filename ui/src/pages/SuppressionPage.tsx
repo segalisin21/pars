@@ -2,11 +2,17 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { PageMeta, SuppressionRow } from '../lib/api'
 import { DataTable } from '../components/DataTable'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { SkeletonBlock } from '../components/SkeletonBlock'
+import { formatApiError } from '../lib/formatError'
+import { maskTelegramUserId } from '../lib/maskId'
 
 export function SuppressionPage() {
   const [items, setItems] = useState<SuppressionRow[] | null>(null)
   const [page, setPage] = useState<PageMeta | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
 
   const [q, setQ] = useState('')
   const [reason, setReason] = useState('')
@@ -14,6 +20,7 @@ export function SuppressionPage() {
 
   async function load(next?: { offset?: number }) {
     setErr(null)
+    setErrCode(null)
     const offset = next?.offset ?? page?.offset ?? 0
     try {
       const res = await api.listSuppression({
@@ -26,7 +33,9 @@ export function SuppressionPage() {
       setItems(res.items)
       setPage(res.page)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
       setItems(null)
       setPage(null)
     }
@@ -40,7 +49,12 @@ export function SuppressionPage() {
   const rows = items ?? []
   const columns = [
     { key: 'id', header: 'ID', className: 'mono', render: (s: SuppressionRow) => s.id },
-    { key: 'tg', header: 'TG ID', className: 'mono', render: (s: SuppressionRow) => s.tg_user_id ?? '—' },
+    {
+      key: 'tg',
+      header: 'TG ID',
+      className: 'mono',
+      render: (s: SuppressionRow) => (s.tg_user_id != null ? maskTelegramUserId(s.tg_user_id) : '—'),
+    },
     { key: 'un', header: 'Username', className: 'mono', render: (s: SuppressionRow) => (s.username ? `@${s.username}` : '—') },
     { key: 'reason', header: 'Причина', className: 'mono small', render: (s: SuppressionRow) => s.reason },
     { key: 'until', header: 'До', className: 'mono small', render: (s: SuppressionRow) => s.until ?? '—' },
@@ -48,13 +62,12 @@ export function SuppressionPage() {
   ]
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Подавления</h1>
-        <div className="pageSub">Кого не трогаем (и почему).</div>
-      </div>
-
-      {err ? <div className="banner error">{err}</div> : null}
+    <PageLayout title="Подавления" subtitle="Кого не трогаем (глобальный список).">
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load({ offset: page?.offset ?? 0 })}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Фильтры</div>
@@ -75,7 +88,7 @@ export function SuppressionPage() {
             </select>
           </label>
           <div className="toolbarRight">
-            <button className="btn primary" onClick={() => void load({ offset: 0 })}>
+            <button type="button" className="btn primary" onClick={() => void load({ offset: 0 })}>
               Применить
             </button>
           </div>
@@ -85,12 +98,11 @@ export function SuppressionPage() {
       <section className="card">
         <div className="cardTitle">Таблица</div>
         {items === null || page === null ? (
-          <div className="muted">Загрузка…</div>
+          <SkeletonBlock lines={5} />
         ) : (
           <DataTable columns={columns} rows={rows} page={page} onPageChange={(p) => void load({ offset: p.offset })} />
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
-

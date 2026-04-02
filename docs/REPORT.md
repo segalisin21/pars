@@ -319,3 +319,42 @@ If account has 2FA enabled, response error may be `"NEEDS_PASSWORD"`.
 - `banned_or_kicked`
 - `unknown`
 
+---
+
+## Code review snapshot (2026-04-02) — maintainability & SaaS readiness
+
+**Scope:** Static review of `app/` (FastAPI, services, worker, models) + test suite.
+
+**Strengths**
+
+- Single `create_app()` factory; dependency injection for DB and Telegram client supports tests with fakes.
+- Documented error envelope; `HTTPException` handler flattens `detail` when it already matches the contract.
+- `upsert_candidate` uses `begin_nested()` to avoid rolling back unrelated work on unique collisions.
+- Worker jobs (`execute_*_run`) skip execution unless `run.status == "queued"` — basic idempotency for RQ retries.
+- Invite flow: `FloodWaitError` sets `paused` and stops further invites; pacing uses `max_per_minute` / `max_per_hour` with monotonic windows.
+
+**Gaps vs a public / SaaS API**
+
+- No `tenant_id` / workspace: all rows are global; SaaS requires a migration to organizations and row-level scoping (or Postgres RLS).
+- Read endpoints (`GET /sources`, `GET /targets`, `GET /collect-runs`, `GET /candidates`, …) are unauthenticated in v1 — acceptable only behind a private network; for SaaS they must be tied to tenant auth (or API keys) and authorization.
+- `ADMIN_TOKEN` unset disables write auth — fine for local dev only; production must enforce presence + strength (see `docs/SECURITY.md`).
+
+**Verification**
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+---
+
+## Operator UI (`ui/`) — HTTP client (2026-04-02)
+
+The Vite + React app in [`ui/`](ui/) calls the same REST API as documented above.
+
+- **Base URL:** `VITE_API_BASE_URL` (default dev: `http://127.0.0.1:8000`).
+- **Writes:** optional `VITE_ADMIN_TOKEN` → `Authorization: Bearer …` (must match API `ADMIN_TOKEN` when set).
+- **Client helpers:** `api.getCollectRun(id)` / `api.getInviteRun(id)` for deep-linked run views; list endpoints unchanged.
+- **Errors:** failed responses throw `ApiRequestError` with `status`, optional `code` (from `error.code`), and `details` — used for operator-facing banners.
+
+UI does not change the API contract; it is a consumer only.
+

@@ -173,8 +173,46 @@ A thin, separately-deployed web UI gives the operator visibility and control wit
 | `/sources` | List, create, enable/disable sources |
 | `/targets` | List, create, enable/disable targets |
 | `/collect` | Start a CollectRun, view run history and metrics |
+| `/collect/:runId` | Optional deep link: focus one collect run (polling while active) |
 | `/invite` | Start an InviteRun, view run history and per-attempt status |
+| `/invite/:runId` | Optional deep link: focus one invite run |
 | `/candidates` | Read-only candidate table with counts and eligibility indicators |
+| `/attempts` | Filterable invite attempts |
+| `/suppression` | Suppression list |
+| `/audit` | Audit events |
+| `/telegram-auth` | Request code / verify to obtain session string (worker env) |
+
+**Navigation groups (RU UI)**
+
+| Group | Items |
+|---|---|
+| Конфигурация | Источники (`/sources`), Цели (`/targets`) |
+| Операции | Сбор (`/collect`), Инвайт (`/invite`) |
+| Данные | Контакты (`/candidates`), Попытки (`/attempts`), Подавления (`/suppression`) |
+| Система | Аудит (`/audit`), Telegram вход (`/telegram-auth`) |
+
+**Breakpoints (shell)**
+
+| Breakpoint | Layout |
+|---|---|
+| `> 900px` | Fixed sidebar (260px) + main content |
+| `≤ 900px` | Top bar with menu toggle; sidebar slides in as overlay; main full width |
+
+**Sensitive display**
+
+- Do not show full numeric `tg_user_id` in tables; prefer masked hint (`…` + last 4 digits) or label «есть ID».
+- Session string after Telegram verify: one-time display + copy; never persist to `localStorage` by default.
+
+### Implementation matrix (DESIGN vs UI)
+
+| Screen | Loading | Empty | Error | Notes |
+|---|---|---|---|---|
+| Sources | text «Загрузка» | copy + CTA | `Banner` + retry | Skeleton optional (v1.1) |
+| Targets | same | same | same | — |
+| Collect | same | «нет запусков» | same | Polling while any run `queued`/`running`; deep link `/collect/:id` |
+| Invite | same | same | same | Polling; `/invite/:id`; show `paused` + `pause_reason` |
+| Candidates | same | empty copy | same | Filters + pagination; mask `tg_user_id` in list |
+| Attempts / Suppression / Audit | same | empty | same | Filters |
 
 ### Interaction states per page
 
@@ -330,6 +368,36 @@ The system is composed of four runtime services plus one managed backing service
 - Whether `ui` is a SPA (React/Vite) or server-rendered (Jinja2 via `api`) — defer until frontend tech is confirmed.
 - Redis persistence mode — ephemeral fine for v1; revisit if job durability is required.
 - Railway private networking vs. public URLs with token auth for internal service communication — prefer private networking.
+
+---
+
+## SaaS evolution roadmap (product & UX)
+
+**Current state:** single-deployment operator tool — one logical dataset, one shared `ADMIN_TOKEN`, optional Redis-backed worker.
+
+**Phase A — Foundations (before billing)**
+
+1. **Identity** — sign-up / login (email+magic link or OAuth), session cookies or JWT for the UI; separate long-lived **API keys** for automation (hashed at rest).
+2. **Workspaces (tenants)** — each user belongs to one or more workspaces; every source, target, candidate, run, audit row carries `workspace_id` (or `org_id`).
+3. **Authorization** — role model at minimum: `owner`, `operator`, `viewer`; enforce on every route and in worker jobs (pass workspace id into job payload, verify in worker).
+4. **Isolation** — queries always filter by workspace; optional Postgres Row Level Security for defense in depth; no cross-tenant joins in reporting.
+
+**Phase B — Commercial**
+
+5. **Billing** — Stripe (or similar) customer ↔ workspace; plans that cap sources, monthly invite attempts, or seats.
+6. **Usage metering** — aggregate counts per workspace (invites, collects) for limits and invoices.
+7. **Onboarding** — connect Telegram account per workspace (session storage encrypted KMS or vault; never log session strings).
+
+**Phase C — Scale & trust**
+
+8. **Rate limiting** — HTTP rate limits per API key / workspace; queue fairness across tenants.
+9. **Compliance** — export/delete workspace data; retention policies; DPA-friendly logging (no PII in logs).
+
+**Design implications**
+
+- Operator UI becomes **workspace-scoped** (switcher in header, empty states per workspace).
+- Error copy must not leak whether a resource exists in another tenant (404 vs 403 policy).
+- Run history and audit timelines are **per workspace** only.
 
 ---
 

@@ -465,3 +465,59 @@ pytest tests/ -v --tb=short
 ### Risks / known limitations
 
 - Production must still run `ALTER TABLE ... BIGINT` on existing Postgres if columns were created as INTEGER; see `docs/RAILWAY.md`.
+
+
+## 2026-04-02 (office-parallel: full code review + SaaS roadmap)
+
+### What changed
+
+- **Dev / API:** Reviewed `app/main.py`, `services.py`, `worker_jobs.py`, `models.py`, `dependencies.py`. Appended **Code review snapshot** to `docs/REPORT.md` (strengths, SaaS-related gaps, verify command).
+- **Design:** Added **SaaS evolution roadmap** to `docs/DESIGN.md` — phased plan: identity → workspaces → billing → metering → scale/compliance; UX implications (workspace switcher, 404 vs 403).
+- **QA:** Added **Full code review (2026-04-02)** section to `docs/QA_REPORT.md` — test coverage summary, auth/read exposure note, worker idempotency, invite pause behavior, SaaS test backlog.
+- **Security:** Added **SaaS / multi-tenant (future)** to `docs/SECURITY.md` — isolation, API keys, per-tenant Telegram secrets, abuse/billing, privacy.
+
+### Key files
+
+- `docs/REPORT.md`, `docs/DESIGN.md`, `docs/QA_REPORT.md`, `docs/SECURITY.md`
+- Code reviewed: `app/main.py`, `app/services.py`, `app/worker_jobs.py`, `app/models.py`, `app/db.py`, `app/dependencies.py`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- v1 remains **single-tenant**; SaaS requires schema migration (`workspace_id`), new auth, and worker/job changes — not implemented in this pass (documentation only).
+- Several `GET` routes remain without bearer auth by design for v1; public exposure requires gating or API keys per `docs/SECURITY.md`.
+
+
+## 2026-04-02 (office-parallel: UI rework per plan)
+
+### What changed
+
+- **Design:** `docs/DESIGN.md` — навигационные группы, breakpoints (900px), матрица экран×состояния, deep links `/collect/:runId` / `/invite/:runId`, правила маскирования TG ID.
+- **Dev / REPORT:** `docs/REPORT.md` — секция **Operator UI — HTTP client** (`VITE_*`, `ApiRequestError`, `getCollectRun`/`getInviteRun`).
+- **QA:** `docs/QA_REPORT.md` — чеклист **Operator UI smoke** (shell, polling, deep links, маски, lint/build).
+- **Security:** `docs/SECURITY.md` — **Operator UI — tokens and CORS** (`VITE_ADMIN_TOKEN`, session string, CORS).
+- **UI code:** токены в `ui/src/index.css`, адаптивный shell и группы в `ui/src/App.tsx` + `App.css`; `PageLayout`, `UiBanner`, `SkeletonBlock`, `EmptyState`; `ApiRequestError` и `formatApiError` в `ui/src/lib/`; `maskTelegramUserId`; `useApiHealth`; polling на Collect/Invite; обновлены все страницы; клиентские методы `getCollectRun`/`getInviteRun` в `ui/src/lib/api.ts`.
+
+### Key files
+
+- `ui/src/App.tsx`, `ui/src/App.css`, `ui/src/index.css`
+- `ui/src/lib/api.ts`, `ui/src/lib/formatError.ts`, `ui/src/lib/maskId.ts`
+- `ui/src/pages/*.tsx`, `ui/src/components/PageLayout.tsx`, `UiBanner.tsx`, `SkeletonBlock.tsx`, `EmptyState.tsx`
+- `docs/DESIGN.md`, `docs/REPORT.md`, `docs/QA_REPORT.md`, `docs/SECURITY.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Закрытие мобильного меню при навигации «Назад» в браузере — только через backdrop/повторное открытие меню (убран `useEffect` на `pathname` из‑за правила ESLint react-hooks).
+- Маска TG ID в UI не скрывает данные от оператора с доступом к API — только снижает удобство случайного копирования с экрана.

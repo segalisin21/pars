@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import type { Target } from '../lib/api'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { SkeletonBlock } from '../components/SkeletonBlock'
+import { EmptyState } from '../components/EmptyState'
+import { formatApiError } from '../lib/formatError'
 
 export function TargetsPage() {
   const [items, setItems] = useState<Target[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const [identifier, setIdentifier] = useState('')
@@ -18,11 +24,14 @@ export function TargetsPage() {
 
   async function load() {
     setErr(null)
+    setErrCode(null)
     try {
       const r = await api.listTargets()
       setItems(r.items)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
       setItems(null)
     }
   }
@@ -35,12 +44,15 @@ export function TargetsPage() {
     if (!canSubmit) return
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     try {
       await api.createTarget({ identifier: identifier.trim(), enabled: true })
       setIdentifier('')
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Create failed')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
@@ -49,24 +61,26 @@ export function TargetsPage() {
   async function onToggle(t: Target) {
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     try {
       await api.patchTarget(t.id, { enabled: !t.enabled })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Update failed')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Цели</h1>
-        <div className="pageSub">Группы/чаты, куда приглашаем пользователей.</div>
-      </div>
-
-      {err ? <div className="banner error">{err}</div> : null}
+    <PageLayout title="Цели" subtitle="Группы/чаты, куда приглашаем пользователей.">
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load()}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Добавить цель</div>
@@ -80,7 +94,7 @@ export function TargetsPage() {
               disabled={busy}
             />
           </label>
-          <button className="btn primary" onClick={onCreate} disabled={busy || !canSubmit}>
+          <button type="button" className="btn primary" onClick={() => void onCreate()} disabled={busy || !canSubmit}>
             Добавить
           </button>
         </div>
@@ -99,9 +113,9 @@ export function TargetsPage() {
           </div>
         </div>
         {items === null ? (
-          <div className="muted">Загрузка…</div>
+          <SkeletonBlock lines={4} />
         ) : items.length === 0 ? (
-          <div className="muted">Целей пока нет. Добавьте первую цель.</div>
+          <EmptyState title="Целей пока нет" hint="Добавьте первую цель выше." />
         ) : (
           <table className="table">
             <thead>
@@ -119,7 +133,7 @@ export function TargetsPage() {
                   <td className="mono">@{t.identifier}</td>
                   <td>{t.enabled ? 'Включена' : 'Выключена'}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn" onClick={() => void onToggle(t)} disabled={busy}>
+                    <button type="button" className="btn" onClick={() => void onToggle(t)} disabled={busy}>
                       {t.enabled ? 'Выключить' : 'Включить'}
                     </button>
                   </td>
@@ -129,7 +143,6 @@ export function TargetsPage() {
           </table>
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
-

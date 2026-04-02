@@ -3,11 +3,22 @@ import { api } from '../lib/api'
 import type { Candidate, PageMeta, Source } from '../lib/api'
 import { DataTable } from '../components/DataTable'
 import { Drawer } from '../components/Drawer'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { SkeletonBlock } from '../components/SkeletonBlock'
+import { formatApiError } from '../lib/formatError'
+import { maskTelegramUserId } from '../lib/maskId'
 
 function fmtUser(c: Candidate): string {
   if (c.username) return `@${c.username}`
-  if (c.tg_user_id) return String(c.tg_user_id)
+  if (c.tg_user_id) return `ID ${maskTelegramUserId(c.tg_user_id)}`
   return `#${c.id}`
+}
+
+function idQuality(c: Candidate): { label: string; cls: string } {
+  if (c.tg_user_id) return { label: 'есть TG ID', cls: 'badge ok' }
+  if (c.username) return { label: 'только @', cls: 'badge warn' }
+  return { label: 'нет идентификатора', cls: 'badge err' }
 }
 
 export function CandidatesPage() {
@@ -15,6 +26,7 @@ export function CandidatesPage() {
   const [items, setItems] = useState<Candidate[] | null>(null)
   const [page, setPage] = useState<PageMeta | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
 
   const [q, setQ] = useState('')
   const [sourceId, setSourceId] = useState<number | ''>('')
@@ -32,6 +44,7 @@ export function CandidatesPage() {
   async function load(next?: { offset?: number }) {
     const nextOffset = next?.offset ?? offset
     setErr(null)
+    setErrCode(null)
     try {
       const [srcs, res] = await Promise.all([
         api.listSources(),
@@ -48,7 +61,9 @@ export function CandidatesPage() {
       setPage(res.page)
       setOffset(nextOffset)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
       setSources(null)
       setItems(null)
       setPage(null)
@@ -67,7 +82,9 @@ export function CandidatesPage() {
       const r = await api.getCandidate(id)
       setDetail(r)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Не удалось загрузить детали')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     }
   }
 
@@ -75,10 +92,18 @@ export function CandidatesPage() {
   const columns = [
     { key: 'id', header: 'ID', className: 'mono', render: (c: Candidate) => c.id },
     {
+      key: 'qual',
+      header: 'Идентификатор',
+      render: (c: Candidate) => {
+        const q = idQuality(c)
+        return <span className={q.cls}>{q.label}</span>
+      },
+    },
+    {
       key: 'user',
       header: 'Контакт',
       render: (c: Candidate) => (
-        <button className="btn" onClick={() => void openCandidate(c.id)}>
+        <button type="button" className="btn" onClick={() => void openCandidate(c.id)}>
           {fmtUser(c)}
         </button>
       ),
@@ -98,13 +123,12 @@ export function CandidatesPage() {
   ]
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Контакты</h1>
-        <div className="pageSub">Кандидаты из базы: кто сохранён и из каких источников.</div>
-      </div>
-
-      {err ? <div className="banner error">{err}</div> : null}
+    <PageLayout title="Контакты" subtitle="Кандидаты из базы и источники происхождения.">
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load({ offset: page?.offset ?? 0 })}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Фильтры</div>
@@ -126,14 +150,14 @@ export function CandidatesPage() {
           </label>
           <label className="field">
             <div className="label">TG ID</div>
-            <select value={hasTgId} onChange={(e) => setHasTgId(e.target.value as any)}>
+            <select value={hasTgId} onChange={(e) => setHasTgId(e.target.value as 'all' | 'yes' | 'no')}>
               <option value="all">Все</option>
               <option value="yes">Есть</option>
               <option value="no">Нет</option>
             </select>
           </label>
           <div className="toolbarRight">
-            <button className="btn primary" onClick={() => void load({ offset: 0 })}>
+            <button type="button" className="btn primary" onClick={() => void load({ offset: 0 })}>
               Применить
             </button>
           </div>
@@ -143,14 +167,14 @@ export function CandidatesPage() {
       <section className="card">
         <div className="cardTitle">Таблица</div>
         {items === null || page === null ? (
-          <div className="muted">Загрузка…</div>
+          <SkeletonBlock lines={5} />
         ) : (
           <DataTable
             columns={columns}
             rows={rows}
             page={page}
             onPageChange={(p) => void load({ offset: p.offset })}
-            empty={<div className="muted">Контактов пока нет.</div>}
+            empty={<div className="muted">Контактов пока нет. Сначала запустите сбор.</div>}
           />
         )}
       </section>
@@ -158,10 +182,16 @@ export function CandidatesPage() {
       <Drawer open={openId !== null} title={openId ? `Контакт ${openId}` : 'Контакт'} onClose={() => setOpenId(null)}>
         {!openId ? null : detail ? (
           <>
-            <div className="row" style={{ alignItems: 'center' }}>
-              <span className="badge ok">ID {detail.id}</span>
+            <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <span className="badge ok">внутренний #{detail.id}</span>
               <span className="badge">{fmtUser(detail)}</span>
             </div>
+            {detail.tg_user_id ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="muted small">Telegram user id (маска)</div>
+                <div className="mono">{maskTelegramUserId(detail.tg_user_id)}</div>
+              </div>
+            ) : null}
             <div style={{ marginTop: 12 }}>
               <div className="muted small">Имя</div>
               <div>{detail.display_name ?? <span className="muted">—</span>}</div>
@@ -187,7 +217,6 @@ export function CandidatesPage() {
           <div className="muted">Загрузка…</div>
         )}
       </Drawer>
-    </div>
+    </PageLayout>
   )
 }
-

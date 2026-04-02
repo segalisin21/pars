@@ -2,17 +2,23 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { AuditEvent, PageMeta } from '../lib/api'
 import { DataTable } from '../components/DataTable'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { SkeletonBlock } from '../components/SkeletonBlock'
+import { formatApiError } from '../lib/formatError'
 
 export function AuditPage() {
   const [items, setItems] = useState<AuditEvent[] | null>(null)
   const [page, setPage] = useState<PageMeta | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
 
   const [action, setAction] = useState('')
   const [entityType, setEntityType] = useState('')
 
   async function load(next?: { offset?: number }) {
     setErr(null)
+    setErrCode(null)
     const offset = next?.offset ?? page?.offset ?? 0
     try {
       const res = await api.listAudit({
@@ -24,7 +30,9 @@ export function AuditPage() {
       setItems(res.items)
       setPage(res.page)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
       setItems(null)
       setPage(null)
     }
@@ -46,13 +54,12 @@ export function AuditPage() {
   ]
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Аудит</h1>
-        <div className="pageSub">Действия оператора (создание/изменение, запуск runs).</div>
-      </div>
-
-      {err ? <div className="banner error">{err}</div> : null}
+    <PageLayout title="Аудит" subtitle="Действия оператора (создание/изменение, запуск runs).">
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load({ offset: page?.offset ?? 0 })}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Фильтры</div>
@@ -66,7 +73,7 @@ export function AuditPage() {
             <input placeholder="например collect_run" value={entityType} onChange={(e) => setEntityType(e.target.value)} />
           </label>
           <div className="toolbarRight">
-            <button className="btn primary" onClick={() => void load({ offset: 0 })}>
+            <button type="button" className="btn primary" onClick={() => void load({ offset: 0 })}>
               Применить
             </button>
           </div>
@@ -76,12 +83,11 @@ export function AuditPage() {
       <section className="card">
         <div className="cardTitle">Таблица</div>
         {items === null || page === null ? (
-          <div className="muted">Загрузка…</div>
+          <SkeletonBlock lines={5} />
         ) : (
           <DataTable columns={columns} rows={rows} page={page} onPageChange={(p) => void load({ offset: p.offset })} />
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
-

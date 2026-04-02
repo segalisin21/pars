@@ -337,3 +337,34 @@ The Telegram session string (or `.session` file) grants full access to the linke
 - [ ] Container runs as non-root user.
 - [ ] Maximum batch sizes are configured (≤ 50 sources per collect, ≤ 100 candidates per invite).
 - [ ] Structured logging is enabled; no PII in logs.
+
+---
+
+## SaaS / multi-tenant (future)
+
+Moving from a single-operator deployment to **SaaS** changes the threat model:
+
+1. **Tenant isolation** — every query and background job must be scoped by `workspace_id` (or equivalent). Cross-tenant data access is a critical severity bug; prefer defense in depth (app checks + DB RLS).
+2. **Authentication** — replace single `ADMIN_TOKEN` with per-user sessions and per-workspace **API keys** (hashed storage, rotation, revocation).
+3. **Secrets per tenant** — Telegram session material must not be shared across customers; encrypt at rest (KMS) and restrict worker credentials by workspace.
+4. **Abuse & billing** — rate limits per workspace/API key; usage metering to enforce plan limits and detect abuse.
+5. **Legal / privacy** — data export and deletion per workspace; subprocessors and hosting region documented in privacy policy.
+
+Until these exist, **do not expose** the API to untrusted networks with only v1 auth semantics.
+
+---
+
+## Operator UI (`ui/`) — tokens and CORS
+
+### `VITE_ADMIN_TOKEN` in the browser
+
+The static UI build may embed `VITE_ADMIN_TOKEN` at **build time**. Anyone who can load the deployed UI can extract the token from the JavaScript bundle (or use it in the browser). Treat this as:
+
+- **Not a secret** from the perspective of a user who is allowed to open the operator panel.
+- **Unsuitable** for scenarios where untrusted users must be kept from calling the API — use server-side sessions or OAuth + backend-issued cookies for SaaS.
+
+For **same-origin** deployment (UI and API on the same site), CORS is less relevant; for **cross-origin** (UI on `app.example.com`, API on `api.example.com`), set `CORS_ALLOWED_ORIGINS` on the API to the exact UI origin.
+
+### Telegram session string in the UI
+
+The Telegram auth flow may display `session_string` once after verification. **Do not** persist it in `localStorage`/`sessionStorage` without an explicit security review. Copy to clipboard and configure `TG_SESSION_STRING` only on the **worker** service.

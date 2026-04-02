@@ -136,6 +136,29 @@ function getAdminToken(): string | undefined {
   return v || undefined
 }
 
+/** Thrown on non-2xx; includes API `error.code` when present. */
+export class ApiRequestError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly details: Record<string, unknown>
+
+  constructor(message: string, status: number, code?: string, details: Record<string, unknown> = {}) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.code = code
+    this.details = details
+  }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : null
+  } catch {
+    return null
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${getBaseUrl()}${path}`
   const headers = new Headers(init?.headers)
@@ -146,12 +169,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(url, { ...init, headers })
   const text = await res.text()
-  const json = text ? (JSON.parse(text) as unknown) : null
+  const json = parseJson(text)
 
   if (!res.ok) {
-    const err = json as ApiError
-    const msg = err?.error?.message || `HTTP ${res.status}`
-    throw new Error(msg)
+    const err = json as Partial<ApiError> | null
+    const msg = err?.error?.message || text || `HTTP ${res.status}`
+    const code = err?.error?.code
+    const details = err?.error?.details && typeof err.error.details === 'object' ? err.error.details : {}
+    throw new ApiRequestError(msg, res.status, code, details as Record<string, unknown>)
   }
   return json as T
 }
@@ -172,10 +197,12 @@ export const api = {
     request<Target>(`/targets/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
   listCollectRuns: () => request<{ items: CollectRun[] }>('/collect-runs'),
+  getCollectRun: (id: number) => request<CollectRun>(`/collect-runs/${id}`),
   startCollectRun: (payload: { source_ids: number[] }) =>
     request<CollectRun>('/collect-runs', { method: 'POST', body: JSON.stringify(payload) }),
 
   listInviteRuns: () => request<{ items: InviteRun[] }>('/invite-runs'),
+  getInviteRun: (id: number) => request<InviteRun>(`/invite-runs/${id}`),
   startInviteRun: (payload: { target_id: number; policy?: Record<string, unknown> }) =>
     request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
 

@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
 import { api } from '../lib/api'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { formatApiError } from '../lib/formatError'
 
 export function TelegramAuthPage() {
   const [phone, setPhone] = useState('')
@@ -9,6 +12,7 @@ export function TelegramAuthPage() {
   const [needsPassword, setNeedsPassword] = useState(false)
   const [sessionString, setSessionString] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const canRequest = useMemo(() => phone.trim().length >= 5, [phone])
@@ -17,6 +21,7 @@ export function TelegramAuthPage() {
   async function requestCode() {
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     setSessionString(null)
     setNeedsPassword(false)
     try {
@@ -31,7 +36,9 @@ export function TelegramAuthPage() {
       }
       setToken(r.token)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Ошибка запроса кода')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
@@ -41,6 +48,7 @@ export function TelegramAuthPage() {
     if (!token) return
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     setSessionString(null)
     try {
       const r = await api.telegramVerifyCode({
@@ -50,7 +58,7 @@ export function TelegramAuthPage() {
       })
       if (r.error === 'NEEDS_PASSWORD') {
         setNeedsPassword(true)
-        setErr('Нужен пароль 2FA. Введите пароль и нажмите “Подтвердить”.')
+        setErr('Нужен пароль 2FA. Введите пароль и нажмите «Подтвердить».')
         return
       }
       if (!r.success) {
@@ -63,7 +71,9 @@ export function TelegramAuthPage() {
       }
       setSessionString(r.session_string)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Ошибка подтверждения')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
@@ -75,16 +85,20 @@ export function TelegramAuthPage() {
   }
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Telegram вход</h1>
-        <div className="pageSub">
-          Получите <span className="mono">TG_SESSION_STRING</span> (Telethon StringSession) и вставьте его в Railway в сервис{' '}
-          <b>worker</b>.
-        </div>
-      </div>
+    <PageLayout
+      title="Telegram вход"
+      subtitle="Получите строку сессии для переменной TG_SESSION_STRING в сервисе worker (Railway)."
+    >
+      <UiBanner variant="info">
+        Не сохраняйте session string в браузере (localStorage) и не коммитьте в репозиторий. Скопируйте один раз и вставьте только в
+        секреты worker.
+      </UiBanner>
 
-      {err ? <div className="banner error">{err}</div> : null}
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Шаг 1 — запросить код</div>
@@ -93,14 +107,12 @@ export function TelegramAuthPage() {
             <div className="label">Телефон</div>
             <input placeholder="+79991234567" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={busy} />
           </label>
-          <button className="btn primary" onClick={() => void requestCode()} disabled={busy || !canRequest}>
+          <button type="button" className="btn primary" onClick={() => void requestCode()} disabled={busy || !canRequest}>
             Запросить код
           </button>
         </div>
         {token ? (
-          <div className="hint">
-            Token получен. Переходите к шагу 2. (Token живёт ~10 минут, хранится только в памяти API.)
-          </div>
+          <div className="hint">Token получен. Переходите к шагу 2. (Token живёт ~10 минут, хранится только в памяти API.)</div>
         ) : (
           <div className="hint">
             Требуется: на сервисе <b>api</b> должны быть заданы <code>TG_API_ID</code> и <code>TG_API_HASH</code>.
@@ -115,7 +127,7 @@ export function TelegramAuthPage() {
             <div className="label">Код</div>
             <input placeholder="12345" value={code} onChange={(e) => setCode(e.target.value)} disabled={busy || !token} />
           </label>
-          <button className="btn primary" onClick={() => void verify()} disabled={busy || !canVerify}>
+          <button type="button" className="btn primary" onClick={() => void verify()} disabled={busy || !canVerify}>
             Подтвердить
           </button>
         </div>
@@ -136,7 +148,7 @@ export function TelegramAuthPage() {
         ) : null}
 
         <div className="hint">
-          Важно: операции требуют <code>VITE_ADMIN_TOKEN</code> (UI) и <code>ADMIN_TOKEN</code> (API), если токен включён.
+          Нужны <code>VITE_ADMIN_TOKEN</code> в UI и <code>ADMIN_TOKEN</code> на API, если токен включён.
         </div>
       </section>
 
@@ -145,8 +157,7 @@ export function TelegramAuthPage() {
         {sessionString ? (
           <>
             <div className="hint">
-              Скопируйте строку и добавьте в Railway переменную окружения <code>TG_SESSION_STRING</code> <b>только</b> в сервис{' '}
-              <b>worker</b>.
+              Скопируйте строку и добавьте в Railway переменную <code>TG_SESSION_STRING</code> <b>только</b> в сервис <b>worker</b>.
             </div>
             <textarea
               className="mono"
@@ -164,7 +175,7 @@ export function TelegramAuthPage() {
               value={sessionString}
             />
             <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-              <button className="btn" onClick={() => void copySession()}>
+              <button type="button" className="btn" onClick={() => void copySession()}>
                 Скопировать
               </button>
             </div>
@@ -173,7 +184,6 @@ export function TelegramAuthPage() {
           <div className="muted">Пока нет session string.</div>
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
-

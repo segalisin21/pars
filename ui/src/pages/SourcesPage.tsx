@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import type { Source } from '../lib/api'
+import { PageLayout } from '../components/PageLayout'
+import { UiBanner } from '../components/UiBanner'
+import { SkeletonBlock } from '../components/SkeletonBlock'
+import { EmptyState } from '../components/EmptyState'
+import { formatApiError } from '../lib/formatError'
 
 export function SourcesPage() {
   const [items, setItems] = useState<Source[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [errCode, setErrCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const [type, setType] = useState<'group' | 'chat' | 'channel'>('group')
@@ -19,11 +25,14 @@ export function SourcesPage() {
 
   async function load() {
     setErr(null)
+    setErrCode(null)
     try {
       const r = await api.listSources()
       setItems(r.items)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
       setItems(null)
     }
   }
@@ -36,12 +45,15 @@ export function SourcesPage() {
     if (!canSubmit) return
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     try {
       await api.createSource({ type, identifier: identifier.trim(), enabled: true })
       setIdentifier('')
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Create failed')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
@@ -50,31 +62,36 @@ export function SourcesPage() {
   async function onToggle(src: Source) {
     setBusy(true)
     setErr(null)
+    setErrCode(null)
     try {
       await api.patchSource(src.id, { enabled: !src.enabled })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Update failed')
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="page">
-      <div className="pageHeader">
-        <h1>Источники</h1>
-        <div className="pageSub">Чаты / группы / каналы, откуда собираем кандидатов.</div>
-      </div>
-
-      {err ? <div className="banner error">{err}</div> : null}
+    <PageLayout
+      title="Источники"
+      subtitle="Чаты / группы / каналы, откуда собираем кандидатов."
+    >
+      {err ? (
+        <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load()}>
+          {err}
+        </UiBanner>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Добавить источник</div>
         <div className="row">
           <label className="field">
             <div className="label">Тип</div>
-            <select value={type} onChange={(e) => setType(e.target.value as any)} disabled={busy}>
+            <select value={type} onChange={(e) => setType(e.target.value as 'group' | 'chat' | 'channel')} disabled={busy}>
               <option value="group">group</option>
               <option value="chat">chat</option>
               <option value="channel">channel</option>
@@ -91,12 +108,12 @@ export function SourcesPage() {
             />
           </label>
 
-          <button className="btn primary" onClick={onCreate} disabled={busy || !canSubmit}>
+          <button type="button" className="btn primary" onClick={() => void onCreate()} disabled={busy || !canSubmit}>
             Добавить
           </button>
         </div>
         <div className="hint">
-          Важно: операции записи требуют <code>VITE_ADMIN_TOKEN</code>, если на API установлен <code>ADMIN_TOKEN</code>.
+          Запись требует <code>VITE_ADMIN_TOKEN</code>, если на API задан <code>ADMIN_TOKEN</code>.
         </div>
       </section>
 
@@ -113,9 +130,9 @@ export function SourcesPage() {
           </div>
         </div>
         {items === null ? (
-          <div className="muted">Загрузка…</div>
+          <SkeletonBlock lines={4} />
         ) : items.length === 0 ? (
-          <div className="muted">Источников пока нет. Добавьте первый источник.</div>
+          <EmptyState title="Источников пока нет" hint="Добавьте первый источник выше." />
         ) : (
           <table className="table">
             <thead>
@@ -135,7 +152,7 @@ export function SourcesPage() {
                   <td className="mono">@{s.identifier}</td>
                   <td>{s.enabled ? 'Включен' : 'Выключен'}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn" onClick={() => void onToggle(s)} disabled={busy}>
+                    <button type="button" className="btn" onClick={() => void onToggle(s)} disabled={busy}>
                       {s.enabled ? 'Выключить' : 'Включить'}
                     </button>
                   </td>
@@ -145,7 +162,6 @@ export function SourcesPage() {
           </table>
         )}
       </section>
-    </div>
+    </PageLayout>
   )
 }
-
