@@ -5,7 +5,7 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -331,7 +331,7 @@ def create_app(
                 CandidateSourceLink.workspace_id == workspace_id,
                 CandidateSourceLink.source_id == source_id,
             )
-        total = len(db.scalars(total_stmt).all())
+        total = db.scalar(select(func.count()).select_from(total_stmt.subquery())) or 0
 
         c_ids = [c.id for c in candidates]
         sources_by_candidate: dict[int, list[SourceRefOut]] = {cid: [] for cid in c_ids}
@@ -438,7 +438,7 @@ def create_app(
             total_stmt = total_stmt.where(InviteAttempt.status == status)
         if error_code:
             total_stmt = total_stmt.where(InviteAttempt.error_code == error_code)
-        total = len(db.scalars(total_stmt).all())
+        total = db.scalar(select(func.count()).select_from(total_stmt.subquery())) or 0
 
         return InviteAttemptsList(
             items=[
@@ -487,7 +487,19 @@ def create_app(
 
         rows = db.scalars(stmt.order_by(SuppressionList.id.desc()).limit(limit).offset(offset)).all()
 
-        total = len(db.scalars(select(SuppressionList.id).where(SuppressionList.workspace_id == workspace_id)).all())
+        total_stmt = select(SuppressionList.id).where(SuppressionList.workspace_id == workspace_id)
+        if active_only:
+            now = utcnow()
+            total_stmt = total_stmt.where((SuppressionList.until.is_(None)) | (SuppressionList.until > now))
+        if reason:
+            total_stmt = total_stmt.where(SuppressionList.reason == reason)
+        if q:
+            qq = q.strip()
+            if qq.startswith("@"):
+                qq = qq[1:]
+            like = f"%{qq.lower()}%"
+            total_stmt = total_stmt.where((SuppressionList.username.is_not(None) & (SuppressionList.username.ilike(like))))
+        total = db.scalar(select(func.count()).select_from(total_stmt.subquery())) or 0
         return SuppressionListOut(
             items=[
                 SuppressionOut(
@@ -748,7 +760,13 @@ def create_app(
             stmt = stmt.where(AuditEvent.entity_type == entity_type)
 
         rows = db.scalars(stmt.order_by(AuditEvent.id.desc()).limit(limit).offset(offset)).all()
-        total = len(db.scalars(select(AuditEvent.id).where(AuditEvent.workspace_id == workspace_id)).all())
+
+        total_stmt = select(AuditEvent.id).where(AuditEvent.workspace_id == workspace_id)
+        if action:
+            total_stmt = total_stmt.where(AuditEvent.action == action)
+        if entity_type:
+            total_stmt = total_stmt.where(AuditEvent.entity_type == entity_type)
+        total = db.scalar(select(func.count()).select_from(total_stmt.subquery())) or 0
 
         return AuditEventsList(
             items=[

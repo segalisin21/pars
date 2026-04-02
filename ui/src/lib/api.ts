@@ -188,14 +188,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T
 }
 
+/** Short-lived cache for GET /sources to avoid duplicate requests when switching pages (e.g. Collect + Candidates). */
+const SOURCES_LIST_TTL_MS = 30_000
+let sourcesListCache: { items: Source[]; expires: number } | null = null
+
+export function invalidateSourcesListCache(): void {
+  sourcesListCache = null
+}
+
+async function fetchSourcesList(): Promise<{ items: Source[] }> {
+  const data = await request<{ items: Source[] }>('/sources')
+  sourcesListCache = { items: data.items, expires: Date.now() + SOURCES_LIST_TTL_MS }
+  return data
+}
+
 export const api = {
   health: () => request<{ status: string }>('/health'),
 
-  listSources: () => request<{ items: Source[] }>('/sources'),
-  createSource: (payload: { type: string; identifier: string; enabled?: boolean; notes?: string | null }) =>
-    request<Source>('/sources', { method: 'POST', body: JSON.stringify(payload) }),
-  patchSource: (id: number, payload: { enabled?: boolean; notes?: string | null }) =>
-    request<Source>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  listSources: (): Promise<{ items: Source[] }> => {
+    const now = Date.now()
+    if (sourcesListCache && sourcesListCache.expires > now) {
+      return Promise.resolve({ items: sourcesListCache.items })
+    }
+    return fetchSourcesList()
+  },
+  createSource: async (payload: { type: string; identifier: string; enabled?: boolean; notes?: string | null }) => {
+    const r = await request<Source>('/sources', { method: 'POST', body: JSON.stringify(payload) })
+    invalidateSourcesListCache()
+    return r
+  },
+  patchSource: async (id: number, payload: { enabled?: boolean; notes?: string | null }) => {
+    const r = await request<Source>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    invalidateSourcesListCache()
+    return r
+  },
 
   listTargets: () => request<{ items: Target[] }>('/targets'),
   createTarget: (payload: { identifier: string; enabled?: boolean; notes?: string | null }) =>

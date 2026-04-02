@@ -137,6 +137,11 @@
   min-width: 0;
 }
 
+.pageFallback {
+  min-height: 120px;
+  max-width: 560px;
+}
+
 .main a {
   color: var(--panel-accent);
   text-decoration: none;

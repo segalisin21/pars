@@ -1,18 +1,28 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
 import './App.css'
 
-import { CollectPage } from './pages/CollectPage'
-import { InvitePage } from './pages/InvitePage'
-import { SourcesPage } from './pages/SourcesPage'
-import { TargetsPage } from './pages/TargetsPage'
-import { TelegramAuthPage } from './pages/TelegramAuthPage'
-import { CandidatesPage } from './pages/CandidatesPage'
-import { AttemptsPage } from './pages/AttemptsPage'
-import { SuppressionPage } from './pages/SuppressionPage'
-import { AuditPage } from './pages/AuditPage'
+import { SkeletonBlock } from './components/SkeletonBlock'
 import { useApiHealth } from './hooks/useApiHealth'
 import { apiBaseUrl } from './lib/api'
+
+const SourcesPage = lazy(() => import('./pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
+const TargetsPage = lazy(() => import('./pages/TargetsPage').then((m) => ({ default: m.TargetsPage })))
+const CollectPage = lazy(() => import('./pages/CollectPage').then((m) => ({ default: m.CollectPage })))
+const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })))
+const CandidatesPage = lazy(() => import('./pages/CandidatesPage').then((m) => ({ default: m.CandidatesPage })))
+const AttemptsPage = lazy(() => import('./pages/AttemptsPage').then((m) => ({ default: m.AttemptsPage })))
+const SuppressionPage = lazy(() => import('./pages/SuppressionPage').then((m) => ({ default: m.SuppressionPage })))
+const AuditPage = lazy(() => import('./pages/AuditPage').then((m) => ({ default: m.AuditPage })))
+const TelegramAuthPage = lazy(() => import('./pages/TelegramAuthPage').then((m) => ({ default: m.TelegramAuthPage })))
+
+function RouteFallback() {
+  return (
+    <div className="pageFallback">
+      <SkeletonBlock lines={5} />
+    </div>
+  )
+}
 
 function NavBlock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -121,20 +131,22 @@ function App() {
       </aside>
 
       <main className="main">
-        <Routes>
-          <Route path="/" element={<SourcesPage />} />
-          <Route path="/sources" element={<SourcesPage />} />
-          <Route path="/targets" element={<TargetsPage />} />
-          <Route path="/collect" element={<CollectPage />} />
-          <Route path="/collect/:runId" element={<CollectPage />} />
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path="/invite/:runId" element={<InvitePage />} />
-          <Route path="/candidates" element={<CandidatesPage />} />
-          <Route path="/attempts" element={<AttemptsPage />} />
-          <Route path="/suppression" element={<SuppressionPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/telegram-auth" element={<TelegramAuthPage />} />
-        </Routes>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<SourcesPage />} />
+            <Route path="/sources" element={<SourcesPage />} />
+            <Route path="/targets" element={<TargetsPage />} />
+            <Route path="/collect" element={<CollectPage />} />
+            <Route path="/collect/:runId" element={<CollectPage />} />
+            <Route path="/invite" element={<InvitePage />} />
+            <Route path="/invite/:runId" element={<InvitePage />} />
+            <Route path="/candidates" element={<CandidatesPage />} />
+            <Route path="/attempts" element={<AttemptsPage />} />
+            <Route path="/suppression" element={<SuppressionPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/telegram-auth" element={<TelegramAuthPage />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   )

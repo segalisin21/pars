@@ -594,3 +594,25 @@ cd ui && npm run lint && npm run build
 ```bash
 pytest tests/ -v --tb=short
 ```
+
+---
+
+## 2026-04-02 (perf: API COUNT + UI lazy routes + sources cache)
+
+### What changed
+
+- `app/main.py`: paginated list totals use `SELECT count()` via subquery instead of loading all ids; `suppression` and `audit` totals now match the same filters as the list (bugfix).
+- `ui/src/App.tsx`: `React.lazy` + `Suspense` for all page routes; skeleton fallback.
+- `ui/src/lib/api.ts`: in-memory TTL cache (30s) for `listSources`; invalidate on `createSource` / `patchSource`; `invalidateSourcesListCache` exported.
+- `ui/src/App.css`: `.pageFallback` for route loading state.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Stale sources list for up to 30s after mutations from another tab/client until TTL expires or user mutates via this client (create/patch invalidate).
