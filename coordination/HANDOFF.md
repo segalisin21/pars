@@ -580,3 +580,17 @@ cd ui && npm run lint && npm run build
 - Existing Postgres databases need a migration (add `workspaces`, `workspace_id` columns, backfill) before deploying this schema; SQLite dev DBs recreate via `create_all`.
 
 - Pushed: `git push origin master:test` (`f61756d..eac3eda`).
+
+
+## 2026-04-02 (docs: Postgres workspace migration for Railway 503)
+
+### What changed
+
+- `scripts/migrate_workspace_pg.sql`: one-time SQL migration for legacy DBs (add `workspaces`, `workspace_id`, per-workspace unique constraints).
+- `docs/RAILWAY.md`: section **Postgres: workspace migration** — explains 503 on `/sources` when schema lags behind code, and how to run the script via `psql` or Railway Query.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```

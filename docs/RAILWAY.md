@@ -137,6 +137,22 @@ ALTER TABLE suppression_list ALTER COLUMN tg_user_id TYPE BIGINT;
 
 Then redeploy `api` and `worker`.
 
+### Postgres: workspace migration (`503` on `/sources`, `/collect-runs`, … while `/health` is `200`)
+
+If you deployed the **workspace / `X-Workspace-Id`** API but the Railway Postgres was created with the **older** schema (no `workspaces` table, no `workspace_id` columns), every DB-backed route can fail and the API returns **`503`** with body `db_unavailable` (SQLAlchemy surfaces a `DBAPIError`).
+
+**Fix (one-time):** run the migration script against the same `DATABASE_URL` the `api` service uses:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migrate_workspace_pg.sql
+```
+
+Or paste the contents of `scripts/migrate_workspace_pg.sql` into Railway Postgres → **Query**. It creates `workspaces`, inserts `id=1` (`default`), adds `workspace_id = 1` to existing rows, and replaces old unique constraints with per-workspace ones.
+
+After a successful run, redeploy or restart `api` (usually not required). **`worker`** uses the same DB — no separate migration.
+
+> If this database was created **from scratch** after the workspace change, `Base.metadata.create_all` already created the new tables — you do **not** need this script.
+
 ### Worker: collect job times out (`JobTimeoutException: ... 180 seconds`)
 
 If collect runs against large groups/channels, fetching participants can take minutes. Increase RQ job timeouts on `worker`:
