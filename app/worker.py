@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 
 from redis import Redis
-from rq import Connection, Worker
+from rq import Worker
+from rq.connections import Connection
 
 
 def main() -> None:

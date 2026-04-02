@@ -54,6 +54,8 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 python -m app.worker
 ```
 
+If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy with the latest commit (we import `Connection` from `rq.connections` for rq 2.x).
+
 - **Environment variables**:
   - `DATABASE_URL` = (from Railway Postgres)
   - `REDIS_URL` = (from Railway Redis)
@@ -81,6 +83,16 @@ npm run preview -- --host 0.0.0.0 --port $PORT
 - **Environment variables**:
   - `VITE_API_BASE_URL` = your `api` public URL
   - `VITE_ADMIN_TOKEN` = same token as `ADMIN_TOKEN` (optional, but required for write actions)
+
+## Common deploy errors
+
+### UI builds as Python and fails with `npm: not found`
+
+This happens when the `ui` service is not configured with **Root directory = `ui`**.
+
+Fix:
+- Ensure the `ui` Railway service has Root directory set to `ui` (not repo root).
+- Redeploy `ui`. It should detect Node/npm toolchain and the build step `npm ci && npm run build` will work.
 
 ## 4) Verify
 
