@@ -521,3 +521,9 @@ cd ui && npm run lint && npm run build
 
 - Закрытие мобильного меню при навигации «Назад» в браузере — только через backdrop/повторное открытие меню (убран `useEffect` на `pathname` из‑за правила ESLint react-hooks).
 - Маска TG ID в UI не скрывает данные от оператора с доступом к API — только снижает удобство случайного копирования с экрана.
+
+
+## 2026-04-02 (publish: push to origin/test)
+
+- Committed `feat(ui): operator panel redesign and office-parallel docs` on `master`.
+- Pushed: `git push origin master:test` → remote branch `test` updated (`352ae9d..550852a`).
