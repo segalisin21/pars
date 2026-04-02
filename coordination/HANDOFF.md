@@ -385,3 +385,20 @@ cd ui && npm run build
 ```bash
 pytest tests/ -v --tb=short
 ```
+
+
+## 2026-04-02 (fix: Railway worker Postgres driver)
+
+### What changed
+
+- Added `psycopg2-binary` to `requirements.txt` so the Railway `worker` can connect to Postgres via SQLAlchemy using the default psycopg2 dialect.
+
+### Key files
+
+- `requirements.txt`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```

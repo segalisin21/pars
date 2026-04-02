@@ -4,6 +4,7 @@ sqlalchemy
 pydantic
 pytest
 httpx
+psycopg2-binary
 redis
 rq
 telethon
