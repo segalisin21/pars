@@ -1,0 +1,14 @@
+.env
+*.session
+session.txt
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.db
+app.db
+node_modules/
+dist/
+.DS_Store
+.cursor/

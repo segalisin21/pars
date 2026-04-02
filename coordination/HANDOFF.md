@@ -1,0 +1,387 @@
+# Handoff
+
+## 2026-04-02
+
+### What changed
+
+- Added initial documentation for v1 service:
+  - `docs/DESIGN.md` (flows, entities, rate limiting, edge cases)
+  - `docs/REPORT.md` (API contract + error format)
+  - `docs/SECURITY.md` (threat model, guardrails, secrets/PII rules)
+  - `docs/TEST_PLAN.md` (pytest strategy and fake Telegram client approach)
+ - Next scope started:
+   - add operator UI (separate frontend) and Railway deployment notes (Postgres + optional Redis + worker)
+
+### Key files
+
+- `docs/DESIGN.md`
+- `docs/REPORT.md`
+- `docs/SECURITY.md`
+- `docs/TEST_PLAN.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Telegram collection/invite capabilities depend on entity types and account permissions; v1 documents constraints but does not yet integrate with real Telegram APIs.
+- Username-only candidates may be uninvitable and should be suppressed to avoid retry loops.
+ - Deployment decisions (Railway services split, Redis/worker) must be reflected in docs and environment variables.
+
+
+## 2026-04-02 (designer: frontend UI + deployment split)
+
+### What changed
+
+- `docs/DESIGN.md`: added two new sections:
+  1. **Operator frontend (v1)** — pages/routes, per-page interaction states (loading/empty/error/success), copy conventions, UI edge cases.
+  2. **Deployment split (v1)** — api/ui/worker/db/redis topology diagram, per-service responsibilities, secret isolation, design considerations, open decisions.
+  3. **Design acceptance checklist** — 8 items covering UX completeness, security, and worker isolation.
+- Non-goals updated to include: no real-time push (SSE/WS) and single-operator only in v1.
+
+### Key files
+
+- `docs/DESIGN.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Frontend tech (SPA vs server-rendered) is an open decision; affects how `ui` is deployed and whether `api` serves it.
+- Redis persistence mode deferred; ephemeral is acceptable for v1.
+- Deployment private networking approach (Railway) not yet finalized.
+
+
+## 2026-04-02 (qa-tester: v1 QA review)
+
+### What changed
+
+- Added `docs/QA_REPORT.md`: full smoke checklist covering API (21 checks), input validation (5), collect flow (9), invite flow (11), deployment split (7), and test infrastructure (11).
+- Filed 8 bug reports under `docs/bugs/`:
+  - **BUG-001** (High/P0): Tests fail without manual PYTHONPATH — no `pytest.ini` `pythonpath` config.
+  - **BUG-002** (High/P1): FloodWait does not pause/abort the invite run; loop continues — risk of Telegram ban.
+  - **BUG-003** (High/P1): `max_per_minute` / `max_per_hour` policy fields silently ignored — no pacing.
+  - **BUG-004** (Medium/P2): `db.rollback()` in `upsert_candidate` rolls back entire transaction including `CollectRun`.
+  - **BUG-005** (Medium/P2): Timestamps lack `Z` UTC suffix — violates REPORT.md contract.
+  - **BUG-006** (Low/P3): Username-only candidates get misleading `error_code="user_not_found"`.
+  - **BUG-007** (Medium/P2): No `GET /collect-runs` or `GET /invite-runs` list endpoints — UI run history blocked.
+  - **BUG-008** (Medium/P2): No `PATCH /sources/{id}` or `PATCH /targets/{id}` — operator cannot toggle enabled state.
+
+### Key files
+
+- `docs/QA_REPORT.md`
+- `docs/bugs/BUG-001.md` through `BUG-008.md`
+
+### How to verify
+
+```bash
+$env:PYTHONPATH = "c:\pars"
+pytest tests/ -v --tb=short
+```
+
+Expected: **7 passed, 0 failed**
+
+### Risks / known limitations from QA review
+
+- **Safety-critical before any real Telegram session**: BUG-002 + BUG-003 (no FloodWait abort + no pacing) will cause account bans.
+- No Telegram exception types beyond `FloodWaitError` — `privacy_restricted`, `already_member`, etc. fall into `unknown`.
+- Suppression list is never auto-populated by the service layer.
+- Runs execute synchronously in the API request — no Redis/RQ worker split yet.
+- No authentication on any write endpoint.
+- Test coverage gaps: dedup fallback, suppression, cooldown, disabled source skip, GET run status paths.
+
+
+## 2026-04-02 (security-auditor: deployment & session hardening)
+
+### What changed
+
+- `docs/SECURITY.md`: major update with five new sections:
+  1. **Railway deployment security** — secret scoping per service, private networking matrix, Dockerfile hygiene.
+  2. **API auth deep dive** — documented missing auth as P0 blocker, token transport rules, implementation checklist.
+  3. **Redis & job idempotency** — queue security, run-status guard, atomic claim, FloodWait interaction, retry policy.
+  4. **Telegram session safety** — storage rules, rotation/revocation procedure, worker-only isolation.
+  5. **Security checklist for go-live** — 20-item checklist (secrets, auth, network, Telegram, jobs, operational).
+- Updated threat model to include network exposure and secret sprawl.
+- Noted missing `.gitignore` and missing CORS middleware as pre-deploy blockers.
+
+### Key files
+
+- `docs/SECURITY.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+(Documentation-only change; no code modified.)
+
+### Risks / known limitations
+
+- **P0 blocker**: No `ADMIN_TOKEN` auth on write endpoints — must be implemented before any non-local deployment.
+- **P0 blocker**: No `.gitignore` — secrets can be accidentally committed.
+- **P1**: No CORS middleware — any origin can call the API if publicly reachable.
+- **P1**: BUG-002 (FloodWait doesn't abort loop) and BUG-003 (pacing not enforced) remain open — Telegram ban risk.
+- **P2**: Worker status guard (`WHERE status = 'queued'`) not yet implemented — risk of double-execution on RQ retries.
+
+
+## 2026-04-02 (planning: Railway + separate UI)
+
+### What changed
+
+- Added `docs/DEPLOYMENT.md` describing:
+  - local-first staging
+  - Railway service split (`ui`/`api`/`worker`/`db`/`redis`)
+  - draft environment variables per service
+- Updated `docs/REPORT.md` to include mandatory Bearer auth requirement for non-local deployments.
+
+### Key files
+
+- `docs/DEPLOYMENT.md`
+- `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+
+## 2026-04-02 (qa-tester: re-run QA — auth/CORS/pacing/FloodWait revision)
+
+### What changed
+
+- **`docs/QA_REPORT.md`** fully rewritten for rev 2:
+  - Extended smoke checklist to cover 15 endpoints (was 9), new auth section (12 checks), new
+    CORS section (4 checks), updated pacing and FloodWait checks, 15 test-infrastructure items.
+  - Bug table updated: BUG-001,002,003,004,007,008 marked **CLOSED — FIXED**; BUG-005,006
+    remain open; BUG-009 added as new.
+- **`docs/bugs/BUG-001.md`** — closed: `pytest.ini` with `pythonpath = .` confirmed present.
+- **`docs/bugs/BUG-002.md`** — closed: FloodWait now sets `status="paused"` and returns early.
+- **`docs/bugs/BUG-003.md`** — closed: pacing (`max_per_minute`/`max_per_hour`) enforced via
+  hard-stop; note on "stop not sleep" difference vs. DESIGN.md's "jittered pauses".
+- **`docs/bugs/BUG-004.md`** — closed: savepoint (`db.begin_nested()`) confirmed in code.
+- **`docs/bugs/BUG-007.md`** — closed: `GET /collect-runs` and `GET /invite-runs` implemented.
+- **`docs/bugs/BUG-008.md`** — closed: `PATCH /sources/{id}` and `PATCH /targets/{id}` implemented.
+- **`docs/bugs/BUG-009.md`** — **NEW (Low/P3)**: `"paused"` is an undocumented `InviteRun`
+  status value; `pause_reason` and `flood_wait_seconds` stats fields are also undocumented.
+
+### Key files
+
+- `docs/QA_REPORT.md`
+- `docs/bugs/BUG-001.md` through `BUG-009.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+Expected: **7 passed, 0 failed** (no PYTHONPATH setup required)
+
+### Risks / known limitations (current state)
+
+- **BUG-005 still open**: Timestamps lack `Z` suffix — `utcnow()` in `models.py` is still
+  `datetime.utcnow()` (naive). Fix: `datetime.now(tz=timezone.utc)`.
+- **BUG-006 still open**: Username-only candidates still get `error_code="user_not_found"`.
+- **BUG-009 new**: `"paused"` status is not in REPORT.md/DESIGN.md enum; `pause_reason` and
+  `flood_wait_seconds` stats keys are undocumented. Blocks operator UI rendering.
+- **Auth untested**: `verify_admin_token` works by code review; no test exercises it with
+  `ADMIN_TOKEN` set. All 7 tests rely on the "no token → skip auth" path.
+- **CORS untested**: `CORSMiddleware` only added when `CORS_ALLOWED_ORIGINS` is set; no test
+  verifies the resulting `Access-Control-Allow-Origin` headers.
+- **New PATCH and list endpoints untested**: `PATCH /sources/{id}`, `PATCH /targets/{id}`,
+  `GET /collect-runs`, `GET /invite-runs` have no automated test coverage.
+- **Pacing is stop-not-sleep**: Run pauses immediately when per-minute or per-hour cap is hit.
+  Operator must re-trigger. DESIGN.md's "jittered pauses" are not implemented.
+- No Telegram exception types beyond `FloodWaitError` — `privacy_restricted`, `already_member`,
+  etc. fall into `"unknown"` and never auto-populate the suppression list.
+
+
+## 2026-04-02 (docs: implementation checklist)
+
+### What changed
+
+- Expanded `docs/DEPLOYMENT.md` with:
+  - local run proposal
+  - Railway step-by-step (services, env vars, networking)
+  - explicit go-live blockers
+- Added `docs/IMPLEMENTATION_CHECKLIST.md` with prioritized P0/P1/P2 items (auth/CORS/worker isolation, FloodWait+pacing, UI endpoints).
+
+### Key files
+
+- `docs/DEPLOYMENT.md`
+- `docs/IMPLEMENTATION_CHECKLIST.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+
+## 2026-04-02 (security-auditor: auth + CORS audit update)
+
+### What changed
+
+- `docs/SECURITY.md`: updated to reflect that `ADMIN_TOKEN` auth and CORS are now implemented in `app/main.py`.
+  - **Auth section**: marked implementation checklist items as done; documented `verify_admin_token` dependency and which endpoints are protected.
+  - **CORS section**: documented `CORS_ALLOWED_ORIGINS` env-var-driven middleware; noted remaining hardening items (wildcard methods/headers).
+  - **API auth deep dive**: rewrote from "not implemented / P0 blocker" to "implemented" with protected/unprotected endpoint lists.
+  - **Go-live checklist**: updated 7 items from `[ ]` to `[x]` or `[~]`; added new "Auth hardening" sub-section with 5 recommended items.
+  - **Remaining gaps documented**:
+    1. Silent auth skip when `ADMIN_TOKEN` env var is unset (local-dev convenience, but dangerous in production).
+    2. No minimum-length enforcement for token at startup.
+    3. Non-constant-time token comparison (`!=` vs `hmac.compare_digest`).
+    4. `allow_methods=["*"]` and `allow_headers=["*"]` broader than needed.
+    5. Zero test coverage for auth (401 behavior) and CORS headers.
+
+### Key files
+
+- `docs/SECURITY.md`
+- `coordination/HANDOFF.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+(Documentation-only change; no code modified.)
+
+### Risks / known limitations
+
+- **No critical blockers remaining for auth/CORS** — both are implemented and functional. The gaps above are hardening items, not blockers.
+- **Test gap** — auth code path is never exercised by existing tests (conftest creates app without `ADMIN_TOKEN`). A deployment could silently regress auth if the dependency is accidentally removed.
+- **P1 blockers unchanged**: BUG-002 (FloodWait) and BUG-003 (pacing) remain open and are still safety-critical for any deployment with a real Telegram session.
+
+
+## 2026-04-02 (designer: API reference + auth/CORS)
+
+### What changed
+
+- `docs/DESIGN.md`: added **REST API reference** section documenting:
+  - All 13 implemented endpoints with method, path, auth requirement, status code, and description.
+  - `ADMIN_TOKEN` auth behaviour (write endpoints only; skipped if unset).
+  - `CORS_ALLOWED_ORIGINS` middleware behaviour.
+  - Unified error envelope format and common error codes.
+  - `PATCH` partial-update semantics for sources and targets.
+- Previously undocumented endpoints (BUG-007 and BUG-008 resolutions): `GET /collect-runs`, `GET /invite-runs`, `PATCH /sources/{id}`, `PATCH /targets/{id}` now reflected in design docs.
+
+### Key files
+
+- `docs/DESIGN.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Auth is enforced only when `ADMIN_TOKEN` env var is set; local dev runs unauthenticated by default.
+- CORS is disabled if `CORS_ALLOWED_ORIGINS` is not set; must be configured for any browser-facing deployment.
+- `PATCH notes: null` clears the notes field — UI must handle this explicitly.
+
+
+## 2026-04-02 (dev: auth, pacing, UI APIs)
+
+### What changed
+
+- Dev hardening + UI-enabling APIs:
+  - Added `pytest.ini` so `pytest tests/ -v --tb=short` works without PYTHONPATH.
+  - Added `.gitignore` with secrets/session/db patterns.
+  - Implemented `ADMIN_TOKEN` auth for write endpoints (skipped when unset for local dev).
+  - Implemented optional CORS via `CORS_ALLOWED_ORIGINS`.
+  - Added `PATCH /sources/{id}` and `PATCH /targets/{id}`.
+  - Added `GET /collect-runs` and `GET /invite-runs` list endpoints.
+- Safety fixes:
+  - FloodWait now pauses the invite run and stops processing further candidates.
+  - Pacing caps now pause the invite run (hard-stop) when exceeded.
+  - Candidate upsert uses a savepoint to avoid rolling back outer transactions.
+  - Timestamps now serialize as ISO-8601 UTC with `Z` suffix.
+  - Username-only candidates are recorded as `missing_tg_user_id`.
+- Docs:
+  - `docs/REPORT.md` updated for new endpoints, `paused` status, and new error code.
+
+### Key files
+
+- `app/main.py`
+- `app/services.py`
+- `app/schemas.py`
+- `app/models.py`
+- `pytest.ini`
+- `.gitignore`
+- `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+
+## 2026-04-02 (dev: operator UI scaffold)
+
+### What changed
+
+- Added separate operator web UI under `ui/` (Vite + React + TypeScript).
+- Implemented pages:
+  - Sources (create/list/toggle)
+  - Targets (create/list/toggle)
+  - Collect (start run + run history)
+  - Invite (start run + run history; highlights `paused`)
+- Added typed API client reading:
+  - `VITE_API_BASE_URL` (defaults to `http://127.0.0.1:8000`)
+  - `VITE_ADMIN_TOKEN` (optional; sent as `Authorization: Bearer ...`)
+- `npm run build` succeeds.
+
+### Key files
+
+- `ui/src/lib/api.ts`
+- `ui/src/pages/*`
+- `ui/.env.example`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run build
+```
+
+
+## 2026-04-02 (dev: worker split via Redis/RQ)
+
+### What changed
+
+- Added Redis/RQ queue integration:
+  - `app/queue.py` (reads `REDIS_URL`, `RQ_QUEUE_NAME`)
+  - `app/worker_jobs.py` (executes queued CollectRun/InviteRun by `run_id`)
+  - `app/worker.py` (RQ worker entrypoint)
+- API behavior:
+  - If `REDIS_URL` is set: `POST /collect-runs` and `POST /invite-runs` enqueue and return `status="queued"`.
+  - If `REDIS_URL` is not set: fallback to synchronous local execution (preserves local-first + tests).
+- Updated `requirements.txt` with `redis` and `rq`.
+
+### Key files
+
+- `app/queue.py`
+- `app/worker.py`
+- `app/worker_jobs.py`
+- `app/main.py`
+- `requirements.txt`
+- `docs/DEPLOYMENT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
