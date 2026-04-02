@@ -547,3 +547,5 @@ cd ui && npm run lint && npm run build
 ### Risks / known limitations
 
 - Railway latency still depends on platform queue/cache; pinning Node reduces toolchain mismatches, not total build time.
+
+- Pushed: `git push origin master:test` (`6bc8b61..be23af5`).
