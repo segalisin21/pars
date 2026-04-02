@@ -71,7 +71,7 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
 - **Build command**:
 
 ```bash
-npm ci && npm run build
+npm run build
 ```
 
 - **Start command** (static preview server):
@@ -93,6 +93,13 @@ This happens when the `ui` service is not configured with **Root directory = `ui
 Fix:
 - Ensure the `ui` Railway service has Root directory set to `ui` (not repo root).
 - Redeploy `ui`. It should detect Node/npm toolchain and the build step `npm ci && npm run build` will work.
+
+### UI fails with `EBUSY: resource busy or locked, rmdir '/app/node_modules/.vite'`
+
+This typically happens when you run `npm ci` twice in the same build plan (Railpack does `npm ci` in the install step already).
+
+Fix:
+- Set the `ui` **Build command** to `npm run build` (do not prefix it with `npm ci && ...`).
 
 ## 4) Verify
 

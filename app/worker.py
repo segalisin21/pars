@@ -4,7 +4,6 @@ import os
 
 from redis import Redis
 from rq import Worker
-from rq.connections import Connection
 
 
 def main() -> None:
@@ -14,9 +13,9 @@ def main() -> None:
 
     queue_name = os.getenv("RQ_QUEUE_NAME") or "default"
     conn = Redis.from_url(redis_url)
-    with Connection(conn):
-        w = Worker([queue_name])
-        w.work(with_scheduler=False)
+    # Avoid rq.Connection import differences across rq versions.
+    w = Worker([queue_name], connection=conn)
+    w.work(with_scheduler=False)
 
 
 if __name__ == "__main__":
