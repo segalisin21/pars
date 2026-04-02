@@ -10,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.db import Base, create_session_factory, create_sqlite_engine
-from app.dependencies import get_db as make_get_db, get_tg_client as make_get_tg
+from app.dependencies import get_db as make_get_db, get_tg_client as make_get_tg, get_workspace_id
 from app.models import (
     AuditEvent,
     CandidateSourceLink,
@@ -21,6 +21,7 @@ from app.models import (
     InviteTarget,
     Source,
     SuppressionList,
+    Workspace,
 )
 from app.schemas import (
     AuditEventOut,
@@ -75,6 +76,16 @@ def error(code: str, message: str, details: dict | None = None) -> HTTPException
     return HTTPException(status_code=400, detail=payload)
 
 
+def _ensure_default_workspace(session_factory) -> None:
+    db = session_factory()
+    try:
+        if db.get(Workspace, 1) is None:
+            db.add(Workspace(id=1, name="default"))
+            db.commit()
+    finally:
+        db.close()
+
+
 def create_app(
     *,
     session_factory=None,
@@ -122,6 +133,8 @@ def create_app(
         Base.metadata.create_all(engine)
         session_factory = create_session_factory(engine)
 
+    _ensure_default_workspace(session_factory)
+
     if tg_client is None:
         class _NoopTelegramClient(TelegramClient):
             def iter_participants(self, source_identifier: str):
@@ -155,18 +168,37 @@ def create_app(
         return {"status": "ok"}
 
     @app.post("/sources", response_model=SourceOut, status_code=201)
-    def create_source(payload: SourceCreate, db: Session = Depends(get_db), _auth=Depends(verify_admin_token)):
-        src = Source(type=payload.type, identifier=payload.identifier, enabled=payload.enabled, notes=payload.notes)
+    def create_source(
+        payload: SourceCreate,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        src = Source(
+            workspace_id=workspace_id,
+            type=payload.type,
+            identifier=payload.identifier,
+            enabled=payload.enabled,
+            notes=payload.notes,
+        )
         db.add(src)
         db.commit()
         db.refresh(src)
-        db.add(AuditEvent(action="source.create", entity_type="source", entity_id=src.id, meta={"type": src.type, "identifier": src.identifier}))
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="source.create",
+                entity_type="source",
+                entity_id=src.id,
+                meta={"type": src.type, "identifier": src.identifier},
+            )
+        )
         db.commit()
         return SourceOut(id=src.id, type=src.type, identifier=src.identifier, enabled=src.enabled, notes=src.notes)
 
     @app.get("/sources", response_model=SourcesList)
-    def list_sources(db: Session = Depends(get_db)):
-        items = db.scalars(select(Source).order_by(Source.id.asc())).all()
+    def list_sources(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
+        items = db.scalars(select(Source).where(Source.workspace_id == workspace_id).order_by(Source.id.asc())).all()
         return SourcesList(
             items=[
                 SourceOut(id=s.id, type=s.type, identifier=s.identifier, enabled=s.enabled, notes=s.notes)
@@ -179,10 +211,11 @@ def create_app(
         source_id: int,
         payload: SourcePatch,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         src = db.get(Source, source_id)
-        if src is None:
+        if src is None or src.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": source_id}}},
@@ -193,23 +226,51 @@ def create_app(
             src.notes = payload.notes
         db.commit()
         db.refresh(src)
-        db.add(AuditEvent(action="source.patch", entity_type="source", entity_id=src.id, meta={"enabled": src.enabled}))
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="source.patch",
+                entity_type="source",
+                entity_id=src.id,
+                meta={"enabled": src.enabled},
+            )
+        )
         db.commit()
         return SourceOut(id=src.id, type=src.type, identifier=src.identifier, enabled=src.enabled, notes=src.notes)
 
     @app.post("/targets", response_model=TargetOut, status_code=201)
-    def create_target(payload: TargetCreate, db: Session = Depends(get_db), _auth=Depends(verify_admin_token)):
-        tgt = InviteTarget(identifier=payload.identifier, enabled=payload.enabled, notes=payload.notes)
+    def create_target(
+        payload: TargetCreate,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        tgt = InviteTarget(
+            workspace_id=workspace_id,
+            identifier=payload.identifier,
+            enabled=payload.enabled,
+            notes=payload.notes,
+        )
         db.add(tgt)
         db.commit()
         db.refresh(tgt)
-        db.add(AuditEvent(action="target.create", entity_type="target", entity_id=tgt.id, meta={"identifier": tgt.identifier}))
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="target.create",
+                entity_type="target",
+                entity_id=tgt.id,
+                meta={"identifier": tgt.identifier},
+            )
+        )
         db.commit()
         return TargetOut(id=tgt.id, identifier=tgt.identifier, enabled=tgt.enabled, notes=tgt.notes)
 
     @app.get("/targets", response_model=TargetsList)
-    def list_targets(db: Session = Depends(get_db)):
-        items = db.scalars(select(InviteTarget).order_by(InviteTarget.id.asc())).all()
+    def list_targets(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
+        items = db.scalars(
+            select(InviteTarget).where(InviteTarget.workspace_id == workspace_id).order_by(InviteTarget.id.asc())
+        ).all()
         return TargetsList(items=[TargetOut(id=t.id, identifier=t.identifier, enabled=t.enabled, notes=t.notes) for t in items])
 
     @app.get("/candidates", response_model=CandidatesList)
@@ -220,12 +281,13 @@ def create_app(
         limit: int = 50,
         offset: int = 0,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
 
-        stmt = select(CandidateUser)
+        stmt = select(CandidateUser).where(CandidateUser.workspace_id == workspace_id)
         if has_tg_user_id is True:
             stmt = stmt.where(CandidateUser.tg_user_id.is_not(None))
         elif has_tg_user_id is False:
@@ -243,13 +305,14 @@ def create_app(
 
         if source_id is not None:
             stmt = stmt.join(CandidateSourceLink, CandidateSourceLink.candidate_id == CandidateUser.id).where(
-                CandidateSourceLink.source_id == source_id
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.source_id == source_id,
             )
 
         candidates = db.scalars(stmt.order_by(CandidateUser.id.desc()).limit(limit).offset(offset)).all()
 
         # Total (simple, v1)
-        total_stmt = select(CandidateUser.id)
+        total_stmt = select(CandidateUser.id).where(CandidateUser.workspace_id == workspace_id)
         if has_tg_user_id is True:
             total_stmt = total_stmt.where(CandidateUser.tg_user_id.is_not(None))
         elif has_tg_user_id is False:
@@ -265,7 +328,8 @@ def create_app(
             )
         if source_id is not None:
             total_stmt = total_stmt.join(CandidateSourceLink, CandidateSourceLink.candidate_id == CandidateUser.id).where(
-                CandidateSourceLink.source_id == source_id
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.source_id == source_id,
             )
         total = len(db.scalars(total_stmt).all())
 
@@ -275,7 +339,10 @@ def create_app(
             rows = db.execute(
                 select(CandidateSourceLink.candidate_id, Source)
                 .join(Source, Source.id == CandidateSourceLink.source_id)
-                .where(CandidateSourceLink.candidate_id.in_(c_ids))
+                .where(
+                    CandidateSourceLink.workspace_id == workspace_id,
+                    CandidateSourceLink.candidate_id.in_(c_ids),
+                )
                 .order_by(Source.id.asc())
             ).all()
             for cid, src in rows:
@@ -301,10 +368,11 @@ def create_app(
     def get_candidate(
         candidate_id: int,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         c = db.get(CandidateUser, candidate_id)
-        if c is None:
+        if c is None or c.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "candidate_not_found", "message": "Candidate not found", "details": {"id": candidate_id}}},
@@ -312,7 +380,10 @@ def create_app(
         rows = db.execute(
             select(Source)
             .join(CandidateSourceLink, CandidateSourceLink.source_id == Source.id)
-            .where(CandidateSourceLink.candidate_id == candidate_id)
+            .where(
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.candidate_id == candidate_id,
+            )
             .order_by(Source.id.asc())
         ).scalars().all()
         sources = [SourceRefOut(id=s.id, type=s.type, identifier=s.identifier) for s in rows]
@@ -336,12 +407,13 @@ def create_app(
         limit: int = 50,
         offset: int = 0,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
 
-        stmt = select(InviteAttempt)
+        stmt = select(InviteAttempt).where(InviteAttempt.workspace_id == workspace_id)
         if invite_run_id is not None:
             stmt = stmt.where(InviteAttempt.invite_run_id == invite_run_id)
         if candidate_id is not None:
@@ -355,7 +427,7 @@ def create_app(
 
         rows = db.scalars(stmt.order_by(InviteAttempt.id.desc()).limit(limit).offset(offset)).all()
 
-        total_stmt = select(InviteAttempt.id)
+        total_stmt = select(InviteAttempt.id).where(InviteAttempt.workspace_id == workspace_id)
         if invite_run_id is not None:
             total_stmt = total_stmt.where(InviteAttempt.invite_run_id == invite_run_id)
         if candidate_id is not None:
@@ -392,6 +464,7 @@ def create_app(
         limit: int = 50,
         offset: int = 0,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         from app.models import utcnow
@@ -399,7 +472,7 @@ def create_app(
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
 
-        stmt = select(SuppressionList)
+        stmt = select(SuppressionList).where(SuppressionList.workspace_id == workspace_id)
         if active_only:
             now = utcnow()
             stmt = stmt.where((SuppressionList.until.is_(None)) | (SuppressionList.until > now))
@@ -414,7 +487,7 @@ def create_app(
 
         rows = db.scalars(stmt.order_by(SuppressionList.id.desc()).limit(limit).offset(offset)).all()
 
-        total = len(db.scalars(select(SuppressionList.id)).all())
+        total = len(db.scalars(select(SuppressionList.id).where(SuppressionList.workspace_id == workspace_id)).all())
         return SuppressionListOut(
             items=[
                 SuppressionOut(
@@ -435,10 +508,11 @@ def create_app(
         target_id: int,
         payload: TargetPatch,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         tgt = db.get(InviteTarget, target_id)
-        if tgt is None:
+        if tgt is None or tgt.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "target_not_found", "message": "Target not found", "details": {"id": target_id}}},
@@ -449,7 +523,15 @@ def create_app(
             tgt.notes = payload.notes
         db.commit()
         db.refresh(tgt)
-        db.add(AuditEvent(action="target.patch", entity_type="target", entity_id=tgt.id, meta={"enabled": tgt.enabled}))
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="target.patch",
+                entity_type="target",
+                entity_id=tgt.id,
+                meta={"enabled": tgt.enabled},
+            )
+        )
         db.commit()
         return TargetOut(id=tgt.id, identifier=tgt.identifier, enabled=tgt.enabled, notes=tgt.notes)
 
@@ -458,18 +540,25 @@ def create_app(
         payload: CollectRunCreate,
         db: Session = Depends(get_db),
         tg: TelegramClient = Depends(get_tg),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         # Validate source ids up-front (consistent 404 behavior)
         for sid in payload.source_ids:
-            if db.get(Source, sid) is None:
+            src = db.get(Source, sid)
+            if src is None or src.workspace_id != workspace_id:
                 raise HTTPException(
                     status_code=404,
                     detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": sid}}},
                 )
 
         if is_queue_enabled():
-            run = CollectRun(status="queued", source_ids=payload.source_ids, stats={})
+            run = CollectRun(
+                workspace_id=workspace_id,
+                status="queued",
+                source_ids=payload.source_ids,
+                stats={},
+            )
             db.add(run)
             db.commit()
             db.refresh(run)
@@ -479,7 +568,15 @@ def create_app(
                 run_id=run.id,
                 job_timeout=_rq_timeout_seconds("RQ_COLLECT_TIMEOUT_SECONDS", 1800),
             )
-            db.add(AuditEvent(action="collect.start", entity_type="collect_run", entity_id=run.id, meta={"source_ids": payload.source_ids}))
+            db.add(
+                AuditEvent(
+                    workspace_id=workspace_id,
+                    action="collect.start",
+                    entity_type="collect_run",
+                    entity_id=run.id,
+                    meta={"source_ids": payload.source_ids},
+                )
+            )
             db.commit()
             return CollectRunOut(
                 id=run.id,
@@ -492,7 +589,7 @@ def create_app(
 
         # Local-first fallback: run synchronously
         try:
-            run = run_collect(db, tg, payload.source_ids)
+            run = run_collect(db, tg, payload.source_ids, workspace_id)
             db.commit()
             db.refresh(run)
         except KeyError as e:
@@ -512,8 +609,10 @@ def create_app(
         )
 
     @app.get("/collect-runs", response_model=CollectRunsList)
-    def list_collect_runs(db: Session = Depends(get_db)):
-        runs = db.scalars(select(CollectRun).order_by(CollectRun.id.desc())).all()
+    def list_collect_runs(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
+        runs = db.scalars(
+            select(CollectRun).where(CollectRun.workspace_id == workspace_id).order_by(CollectRun.id.desc())
+        ).all()
         return CollectRunsList(
             items=[
                 CollectRunOut(
@@ -529,9 +628,9 @@ def create_app(
         )
 
     @app.get("/collect-runs/{run_id}", response_model=CollectRunOut)
-    def get_collect_run(run_id: int, db: Session = Depends(get_db)):
+    def get_collect_run(run_id: int, db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
         run = db.get(CollectRun, run_id)
-        if run is None:
+        if run is None or run.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "collect_run_not_found", "message": "Collect run not found", "details": {"id": run_id}}},
@@ -550,10 +649,11 @@ def create_app(
         payload: InviteRunCreate,
         db: Session = Depends(get_db),
         tg: TelegramClient = Depends(get_tg),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         tgt = db.get(InviteTarget, payload.target_id)
-        if tgt is None:
+        if tgt is None or tgt.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "target_not_found", "message": "Target not found", "details": {"id": payload.target_id}}},
@@ -565,7 +665,13 @@ def create_app(
             )
 
         if is_queue_enabled():
-            run = InviteRun(status="queued", target_id=payload.target_id, policy=payload.policy.model_dump(), stats={})
+            run = InviteRun(
+                workspace_id=workspace_id,
+                status="queued",
+                target_id=payload.target_id,
+                policy=payload.policy.model_dump(),
+                stats={},
+            )
             db.add(run)
             db.commit()
             db.refresh(run)
@@ -575,7 +681,15 @@ def create_app(
                 run_id=run.id,
                 job_timeout=_rq_timeout_seconds("RQ_INVITE_TIMEOUT_SECONDS", 1800),
             )
-            db.add(AuditEvent(action="invite.start", entity_type="invite_run", entity_id=run.id, meta={"target_id": payload.target_id}))
+            db.add(
+                AuditEvent(
+                    workspace_id=workspace_id,
+                    action="invite.start",
+                    entity_type="invite_run",
+                    entity_id=run.id,
+                    meta={"target_id": payload.target_id},
+                )
+            )
             db.commit()
             return InviteRunOut(
                 id=run.id,
@@ -589,7 +703,7 @@ def create_app(
 
         # Local-first fallback: run synchronously
         try:
-            run = run_invite(db, tg, payload.target_id, payload.policy.model_dump())
+            run = run_invite(db, tg, payload.target_id, payload.policy.model_dump(), workspace_id)
             db.commit()
             db.refresh(run)
         except KeyError as e:
@@ -621,19 +735,20 @@ def create_app(
         limit: int = 50,
         offset: int = 0,
         db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
         _auth=Depends(verify_admin_token),
     ):
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
 
-        stmt = select(AuditEvent)
+        stmt = select(AuditEvent).where(AuditEvent.workspace_id == workspace_id)
         if action:
             stmt = stmt.where(AuditEvent.action == action)
         if entity_type:
             stmt = stmt.where(AuditEvent.entity_type == entity_type)
 
         rows = db.scalars(stmt.order_by(AuditEvent.id.desc()).limit(limit).offset(offset)).all()
-        total = len(db.scalars(select(AuditEvent.id)).all())
+        total = len(db.scalars(select(AuditEvent.id).where(AuditEvent.workspace_id == workspace_id)).all())
 
         return AuditEventsList(
             items=[
@@ -651,8 +766,10 @@ def create_app(
         )
 
     @app.get("/invite-runs", response_model=InviteRunsList)
-    def list_invite_runs(db: Session = Depends(get_db)):
-        runs = db.scalars(select(InviteRun).order_by(InviteRun.id.desc())).all()
+    def list_invite_runs(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
+        runs = db.scalars(
+            select(InviteRun).where(InviteRun.workspace_id == workspace_id).order_by(InviteRun.id.desc())
+        ).all()
         return InviteRunsList(
             items=[
                 InviteRunOut(
@@ -669,9 +786,9 @@ def create_app(
         )
 
     @app.get("/invite-runs/{run_id}", response_model=InviteRunOut)
-    def get_invite_run(run_id: int, db: Session = Depends(get_db)):
+    def get_invite_run(run_id: int, db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
         run = db.get(InviteRun, run_id)
-        if run is None:
+        if run is None or run.workspace_id != workspace_id:
             raise HTTPException(
                 status_code=404,
                 detail={"error": {"code": "invite_run_not_found", "message": "Invite run not found", "details": {"id": run_id}}},

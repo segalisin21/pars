@@ -9,12 +9,12 @@ from app.telegram_client import TgUser
 
 def test_process_collect_run_updates_existing_run(session_factory, fake_tg):
     db = session_factory()
-    src = Source(type="group", identifier="@srcw", enabled=True)
+    src = Source(workspace_id=1, type="group", identifier="@srcw", enabled=True)
     db.add(src)
     db.commit()
     db.refresh(src)
 
-    run = CollectRun(status="queued", source_ids=[src.id], stats={})
+    run = CollectRun(workspace_id=1, status="queued", source_ids=[src.id], stats={})
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -37,12 +37,18 @@ def test_process_collect_run_updates_existing_run(session_factory, fake_tg):
 
 def test_process_invite_run_updates_existing_run(session_factory, fake_tg):
     db = session_factory()
-    tgt = InviteTarget(identifier="@tgtw", enabled=True)
+    tgt = InviteTarget(workspace_id=1, identifier="@tgtw", enabled=True)
     db.add(tgt)
     db.commit()
     db.refresh(tgt)
 
-    run = InviteRun(status="queued", target_id=tgt.id, policy={"cooldown_minutes": 0}, stats={})
+    run = InviteRun(
+        workspace_id=1,
+        status="queued",
+        target_id=tgt.id,
+        policy={"cooldown_minutes": 0},
+        stats={},
+    )
     db.add(run)
     db.commit()
     db.refresh(run)

@@ -14,6 +14,16 @@ Authorization: Bearer <ADMIN_TOKEN>
 
 `GET /health` may remain unauthenticated for platform health checks.
 
+### Workspace (multi-tenant scope)
+
+All endpoints except `GET /health` are scoped to a **workspace** (internal tenant id). Send:
+
+```
+X-Workspace-Id: <integer>
+```
+
+If the header is omitted, the server defaults to workspace `1` (local development and tests). The UI sets `VITE_WORKSPACE_ID` (default `1` when unset). Unique constraints on sources, targets, and candidates apply **per workspace**.
+
 ### IDs and identifiers
 
 - `id`: internal integer id (DB primary key)

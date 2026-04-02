@@ -136,6 +136,12 @@ function getAdminToken(): string | undefined {
   return v || undefined
 }
 
+/** Tenant scope for API; must match backend workspace row. */
+function getWorkspaceIdHeader(): string {
+  const v = import.meta.env.VITE_WORKSPACE_ID as string | undefined
+  return v && v.trim() ? v.trim() : '1'
+}
+
 /** Thrown on non-2xx; includes API `error.code` when present. */
 export class ApiRequestError extends Error {
   readonly status: number
@@ -166,6 +172,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const token = getAdminToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  headers.set('X-Workspace-Id', getWorkspaceIdHeader())
 
   const res = await fetch(url, { ...init, headers })
   const text = await res.text()

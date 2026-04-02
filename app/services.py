@@ -53,15 +53,25 @@ def normalize_username(username: str | None) -> str | None:
     return u or None
 
 
-def upsert_candidate(db: Session, tg: TgUser) -> CandidateUser:
+def upsert_candidate(db: Session, workspace_id: int, tg: TgUser) -> CandidateUser:
     username = normalize_username(tg.username)
     now = utcnow()
 
     existing: CandidateUser | None = None
     if tg.tg_user_id is not None:
-        existing = db.scalar(select(CandidateUser).where(CandidateUser.tg_user_id == tg.tg_user_id))
+        existing = db.scalar(
+            select(CandidateUser).where(
+                CandidateUser.workspace_id == workspace_id,
+                CandidateUser.tg_user_id == tg.tg_user_id,
+            )
+        )
     if existing is None and username is not None:
-        existing = db.scalar(select(CandidateUser).where(CandidateUser.username == username))
+        existing = db.scalar(
+            select(CandidateUser).where(
+                CandidateUser.workspace_id == workspace_id,
+                CandidateUser.username == username,
+            )
+        )
 
     if existing is not None:
         existing.last_seen_at = now
@@ -74,13 +84,13 @@ def upsert_candidate(db: Session, tg: TgUser) -> CandidateUser:
         return existing
 
     candidate = CandidateUser(
+        workspace_id=workspace_id,
         tg_user_id=tg.tg_user_id,
         username=username,
         display_name=tg.display_name,
         first_seen_at=now,
         last_seen_at=now,
     )
-    # Use a SAVEPOINT so a unique-constraint collision does not rollback the whole outer transaction.
     try:
         with db.begin_nested():
             db.add(candidate)
@@ -88,26 +98,47 @@ def upsert_candidate(db: Session, tg: TgUser) -> CandidateUser:
         return candidate
     except IntegrityError:
         if tg.tg_user_id is not None:
-            existing = db.scalar(select(CandidateUser).where(CandidateUser.tg_user_id == tg.tg_user_id))
+            existing = db.scalar(
+                select(CandidateUser).where(
+                    CandidateUser.workspace_id == workspace_id,
+                    CandidateUser.tg_user_id == tg.tg_user_id,
+                )
+            )
         if existing is None and username is not None:
-            existing = db.scalar(select(CandidateUser).where(CandidateUser.username == username))
+            existing = db.scalar(
+                select(CandidateUser).where(
+                    CandidateUser.workspace_id == workspace_id,
+                    CandidateUser.username == username,
+                )
+            )
         if existing is None:
             raise
         existing.last_seen_at = now
         return existing
 
 
-def link_candidate_to_source(db: Session, candidate_id: int, source_id: int) -> None:
+def link_candidate_to_source(db: Session, workspace_id: int, candidate_id: int, source_id: int) -> None:
     link = db.scalar(
         select(CandidateSourceLink).where(
-            and_(CandidateSourceLink.candidate_id == candidate_id, CandidateSourceLink.source_id == source_id)
+            and_(
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.candidate_id == candidate_id,
+                CandidateSourceLink.source_id == source_id,
+            )
         )
     )
     if link is None:
-        db.add(CandidateSourceLink(candidate_id=candidate_id, source_id=source_id))
+        db.add(
+            CandidateSourceLink(
+                workspace_id=workspace_id,
+                candidate_id=candidate_id,
+                source_id=source_id,
+            )
+        )
 
 
 def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun) -> CollectRun:
+    workspace_id = run.workspace_id
     batch_size = _int_env("COLLECT_BATCH_SIZE", 300, min_value=1, max_value=5000)
     progress_every = _int_env("COLLECT_PROGRESS_EVERY", 500, min_value=1, max_value=50_000)
 
@@ -141,6 +172,8 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
         src = db.get(Source, sid)
         if src is None:
             raise KeyError(f"source_not_found:{sid}")
+        if src.workspace_id != workspace_id:
+            raise KeyError(f"source_not_found:{sid}")
         if not src.enabled:
             continue
 
@@ -148,11 +181,16 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             discovered_total += 1
             before_id = None
             if u.tg_user_id is not None:
-                existing = db.scalar(select(CandidateUser.id).where(CandidateUser.tg_user_id == u.tg_user_id))
+                existing = db.scalar(
+                    select(CandidateUser.id).where(
+                        CandidateUser.workspace_id == workspace_id,
+                        CandidateUser.tg_user_id == u.tg_user_id,
+                    )
+                )
                 before_id = existing
             try:
-                cand = upsert_candidate(db, u)
-                link_candidate_to_source(db, cand.id, src.id)
+                cand = upsert_candidate(db, workspace_id, u)
+                link_candidate_to_source(db, workspace_id, cand.id, src.id)
             except DataError as e:
                 uid = u.tg_user_id
                 orig_name = type(e.orig).__name__ if e.orig else None
@@ -196,16 +234,22 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     return run
 
 
-def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int]) -> CollectRun:
-    run = CollectRun(status="running", source_ids=source_ids, started_at=utcnow(), stats={})
+def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int], workspace_id: int) -> CollectRun:
+    run = CollectRun(
+        workspace_id=workspace_id,
+        status="running",
+        source_ids=source_ids,
+        started_at=utcnow(),
+        stats={},
+    )
     db.add(run)
     db.flush()
     return process_collect_run(db, tg_client, run)
 
 
-def is_suppressed(db: Session, candidate: CandidateUser, now: datetime) -> bool:
+def is_suppressed(db: Session, workspace_id: int, candidate: CandidateUser, now: datetime) -> bool:
     username = normalize_username(candidate.username)
-    stmt = select(SuppressionList).where(
+    stmt = select(SuppressionList).where(SuppressionList.workspace_id == workspace_id).where(
         or_(
             and_(SuppressionList.tg_user_id.is_not(None), SuppressionList.tg_user_id == candidate.tg_user_id),
             and_(SuppressionList.username.is_not(None), SuppressionList.username == username),
@@ -219,6 +263,7 @@ def is_suppressed(db: Session, candidate: CandidateUser, now: datetime) -> bool:
 
 
 def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -> InviteRun:
+    workspace_id = run.workspace_id
     run.status = "running"
     run.started_at = utcnow()
     run.finished_at = None
@@ -230,6 +275,8 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     policy = run.policy
     target = db.get(InviteTarget, target_id)
     if target is None:
+        raise KeyError(f"target_not_found:{target_id}")
+    if target.workspace_id != workspace_id:
         raise KeyError(f"target_not_found:{target_id}")
     if not target.enabled:
         raise ValueError("target_disabled")
@@ -248,14 +295,19 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     sent_in_min = 0
     sent_in_hour = 0
 
-    candidates = db.scalars(select(CandidateUser).order_by(CandidateUser.id.asc())).all()
+    candidates = db.scalars(
+        select(CandidateUser)
+        .where(CandidateUser.workspace_id == workspace_id)
+        .order_by(CandidateUser.id.asc())
+    ).all()
     for cand in candidates:
-        if is_suppressed(db, cand, now):
+        if is_suppressed(db, workspace_id, cand, now):
             continue
 
         prev_success = db.scalar(
             select(func.count(InviteAttempt.id)).where(
                 and_(
+                    InviteAttempt.workspace_id == workspace_id,
                     InviteAttempt.target_id == target_id,
                     InviteAttempt.candidate_id == cand.id,
                     InviteAttempt.status == "success",
@@ -268,6 +320,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
         recent_attempt = db.scalar(
             select(func.count(InviteAttempt.id)).where(
                 and_(
+                    InviteAttempt.workspace_id == workspace_id,
                     InviteAttempt.target_id == target_id,
                     InviteAttempt.candidate_id == cand.id,
                     InviteAttempt.attempted_at >= cooldown_since,
@@ -282,6 +335,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             skipped += 1
             db.add(
                 InviteAttempt(
+                    workspace_id=workspace_id,
                     invite_run_id=run.id,
                     target_id=target_id,
                     candidate_id=cand.id,
@@ -293,7 +347,6 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             continue
 
         try:
-            # Enforce simple pacing without sleeping: stop the run once limits are reached.
             now_m = monotonic()
             if now_m - window_min_start >= 60:
                 window_min_start = now_m
@@ -320,6 +373,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             sent_in_hour += 1
             db.add(
                 InviteAttempt(
+                    workspace_id=workspace_id,
                     invite_run_id=run.id,
                     target_id=target_id,
                     candidate_id=cand.id,
@@ -333,6 +387,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             failed_by_code[code] = failed_by_code.get(code, 0) + 1
             db.add(
                 InviteAttempt(
+                    workspace_id=workspace_id,
                     invite_run_id=run.id,
                     target_id=target_id,
                     candidate_id=cand.id,
@@ -341,7 +396,6 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
                     attempted_at=utcnow(),
                 )
             )
-            # Safety-critical: stop processing further candidates.
             run.status = "paused"
             run.stats = {
                 "attempted": attempted,
@@ -360,6 +414,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             failed_by_code[code] = failed_by_code.get(code, 0) + 1
             db.add(
                 InviteAttempt(
+                    workspace_id=workspace_id,
                     invite_run_id=run.id,
                     target_id=target_id,
                     candidate_id=cand.id,
@@ -381,9 +436,15 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     return run
 
 
-def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: dict) -> InviteRun:
-    run = InviteRun(status="running", target_id=target_id, policy=policy, started_at=utcnow(), stats={})
+def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: dict, workspace_id: int) -> InviteRun:
+    run = InviteRun(
+        workspace_id=workspace_id,
+        status="running",
+        target_id=target_id,
+        policy=policy,
+        started_at=utcnow(),
+        stats={},
+    )
     db.add(run)
     db.flush()
     return process_invite_run(db, tg_client, run)
-

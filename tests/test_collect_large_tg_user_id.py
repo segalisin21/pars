@@ -9,7 +9,7 @@ from app.telegram_client import TgUser
 
 def test_run_collect_persists_large_tg_user_id(session_factory, fake_tg):
     db = session_factory()
-    src = Source(type="channel", identifier="@largeidtest", enabled=True)
+    src = Source(workspace_id=1, type="channel", identifier="@largeidtest", enabled=True)
     db.add(src)
     db.commit()
     db.refresh(src)
@@ -19,7 +19,7 @@ def test_run_collect_persists_large_tg_user_id(session_factory, fake_tg):
         TgUser(tg_user_id=large_id, username="u1", display_name="U"),
     ]
 
-    run = run_collect(db, fake_tg, [src.id])
+    run = run_collect(db, fake_tg, [src.id], 1)
     assert run.status == "succeeded"
     assert run.stats["discovered_total"] == 1
     assert run.stats["new_candidates"] == 1

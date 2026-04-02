@@ -549,3 +549,32 @@ cd ui && npm run lint && npm run build
 - Railway latency still depends on platform queue/cache; pinning Node reduces toolchain mismatches, not total build time.
 
 - Pushed: `git push origin master:test` (`6bc8b61..be23af5`).
+
+
+## 2026-04-02 (feat: workspace multi-tenant)
+
+### What changed
+
+- **Models:** `Workspace` table; `workspace_id` on sources, targets, candidates, links, suppression, collect/invite runs, invite attempts, audit events; per-workspace unique constraints.
+- **API:** `X-Workspace-Id` header (default `1` via `app.dependencies.get_workspace_id`); all non-health routes filter by workspace; `_ensure_default_workspace` seeds workspace `1` on startup.
+- **Services:** `process_collect_run` / `process_invite_run` / `run_collect` / `run_invite` take workspace from `CollectRun` / `InviteRun` rows.
+- **UI:** `ui/src/lib/api.ts` sends `X-Workspace-Id` from `VITE_WORKSPACE_ID` (default `1`).
+- **Docs:** `docs/REPORT.md` (workspace convention), `docs/SECURITY.md` (scope note).
+- **Tests:** `tests/test_workspace_isolation.py`; fixtures seed workspaces `1` and `2`; ORM tests updated for `workspace_id`.
+
+### Key files
+
+- `app/models.py`, `app/services.py`, `app/main.py`, `app/dependencies.py`
+- `tests/conftest.py`, `tests/test_workspace_isolation.py`
+- `ui/src/lib/api.ts`, `docs/REPORT.md`, `docs/SECURITY.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Existing Postgres databases need a migration (add `workspaces`, `workspace_id` columns, backfill) before deploying this schema; SQLite dev DBs recreate via `create_all`.

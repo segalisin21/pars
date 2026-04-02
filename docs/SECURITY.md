@@ -44,6 +44,10 @@ Implementation checklist:
 
 > **Current status (v1):** Authentication is implemented via `verify_admin_token` dependency on all write/mutating endpoints. `GET /health` remains unauthenticated for health checks.
 
+#### Workspace scope (`X-Workspace-Id`)
+
+Data is partitioned by integer workspace id. The header defaults to `1` when omitted (local/tests). **Do not treat the workspace id as a secret:** it is not a substitute for `ADMIN_TOKEN` on mutating routes. If read endpoints remain unauthenticated in a public deployment, any client that can guess or enumerate workspace ids could read that tenant’s data — gate reads or network access accordingly.
+
 > **Remaining gaps (auth):**
 >
 > 1. **Silent skip when `ADMIN_TOKEN` is unset** — if the env var is missing, the dependency returns immediately (local-dev convenience). This is dangerous in production: an accidental deployment without the variable leaves all write endpoints open. Mitigation: log a warning at startup or refuse to start when `ADMIN_TOKEN` is absent and `DEBUG`/`ENV` is not `"local"`.

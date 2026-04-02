@@ -51,7 +51,15 @@ def test_invite_attempts_list_filters(client, fake_tg):
 def test_suppression_list_endpoint(session_factory, client):
     db: Session = session_factory()
     try:
-        db.add(SuppressionList(tg_user_id=999, username="blocked", reason="privacy_restricted", until=utcnow()))
+        db.add(
+            SuppressionList(
+                workspace_id=1,
+                tg_user_id=999,
+                username="blocked",
+                reason="privacy_restricted",
+                until=utcnow(),
+            )
+        )
         db.commit()
     finally:
         db.close()

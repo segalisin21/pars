@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, create_session_factory
 from app.main import create_app
+from app.models import Workspace
 from app.telegram_client import FloodWaitError, TelegramClient, TgUser
 
 
@@ -43,7 +44,17 @@ def session_factory():
         future=True,
     )
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    sf = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    db = sf()
+    try:
+        if db.get(Workspace, 1) is None:
+            db.add(Workspace(id=1, name="default"))
+        if db.get(Workspace, 2) is None:
+            db.add(Workspace(id=2, name="other"))
+        db.commit()
+    finally:
+        db.close()
+    return sf
 
 
 @pytest.fixture()
