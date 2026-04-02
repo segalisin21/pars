@@ -1,40 +1,80 @@
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+import os
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import CollectRun, InviteRun
 from app.services import run_collect, run_invite
 from app.telegram_client import TelegramClient
 
 
-def execute_collect_run(*, db: Session, tg: TelegramClient, run_id: int) -> None:
-    run = db.get(CollectRun, run_id)
-    if run is None:
-        return
-    if run.status not in {"queued"}:
-        return
-    run.status = "running"
-    db.flush()
+def _get_session_factory() -> sessionmaker[Session]:
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is required for worker jobs")
+    engine = create_engine(db_url, future=True)
+    return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)
 
+
+def _get_tg_client() -> TelegramClient:
+    # v1: Telegram integration is not wired in worker yet.
+    # We keep this as a noop client so the queue pipeline works end-to-end.
+    class _NoopTelegramClient(TelegramClient):
+        def get_participants(self, source_identifier: str):
+            return []
+
+        def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
+            return None
+
+    return _NoopTelegramClient()
+
+
+def execute_collect_run(*, run_id: int) -> None:
+    session_factory = _get_session_factory()
+    tg = _get_tg_client()
+    db = session_factory()
     try:
-        run_collect(db, tg, run.source_ids)
-    except Exception:
-        run.status = "failed"
-        raise
+        run = db.get(CollectRun, run_id)
+        if run is None:
+            return
+        if run.status not in {"queued"}:
+            return
+        run.status = "running"
+        db.flush()
+
+        try:
+            run_collect(db, tg, run.source_ids)
+        except Exception:
+            run.status = "failed"
+            raise
+        finally:
+            db.commit()
+    finally:
+        db.close()
 
 
-def execute_invite_run(*, db: Session, tg: TelegramClient, run_id: int) -> None:
-    run = db.get(InviteRun, run_id)
-    if run is None:
-        return
-    if run.status not in {"queued"}:
-        return
-    run.status = "running"
-    db.flush()
-
+def execute_invite_run(*, run_id: int) -> None:
+    session_factory = _get_session_factory()
+    tg = _get_tg_client()
+    db = session_factory()
     try:
-        run_invite(db, tg, run.target_id, run.policy)
-    except Exception:
-        run.status = "failed"
-        raise
+        run = db.get(InviteRun, run_id)
+        if run is None:
+            return
+        if run.status not in {"queued"}:
+            return
+        run.status = "running"
+        db.flush()
+
+        try:
+            run_invite(db, tg, run.target_id, run.policy)
+        except Exception:
+            run.status = "failed"
+            raise
+        finally:
+            db.commit()
+    finally:
+        db.close()
 
