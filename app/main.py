@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.db import Base, create_session_factory, create_sqlite_engine
@@ -100,10 +101,22 @@ def create_app(
             return JSONResponse(status_code=exc.status_code, content=exc.detail)
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": "http_error", "message": str(exc.detail), "details": {}}})
 
+    @app.exception_handler(DBAPIError)
+    async def db_exception_handler(_request: Request, _exc: DBAPIError):
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"code": "db_unavailable", "message": "Database is temporarily unavailable", "details": {}}},
+        )
+
     if session_factory is None:
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            engine = create_engine(db_url, future=True)
+            engine = create_engine(
+                db_url,
+                future=True,
+                pool_pre_ping=True,
+                pool_recycle=300,
+            )
         else:
             engine = create_sqlite_engine("sqlite:///./app.db")
         Base.metadata.create_all(engine)

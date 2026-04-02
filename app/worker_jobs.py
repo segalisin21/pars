@@ -23,7 +23,12 @@ def _get_session_factory() -> sessionmaker[Session]:
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL is required for worker jobs")
-    engine = create_engine(db_url, future=True)
+    engine = create_engine(
+        db_url,
+        future=True,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)
 
