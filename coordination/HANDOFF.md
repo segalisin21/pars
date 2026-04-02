@@ -644,4 +644,4 @@ cd ui && npm run lint && npm run build
 
 - Default API deploy (noop Telegram) does not fill meta until **worker** runs refresh or queue handles job; `participants_count` from Telegram still may exceed iterable participant count.
 
-- Pushed: `git push origin master:test` (`53c3401..f043481`).
+- Pushed: `git push origin master:test` (`53c3401..bf7160b`).
