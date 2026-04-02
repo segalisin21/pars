@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-# In-memory pending auth state (token -> {phone, phone_code_hash, created_at})
+# In-memory pending auth state (token -> {phone, phone_code_hash, session_string, created_at})
 _pending: dict[str, dict] = {}
 _PENDING_TTL_SECONDS = 600
 
@@ -62,7 +62,8 @@ async def request_code(phone: str) -> RequestCodeResult:
     if not phone:
         return RequestCodeResult(token=None, error="Телефон не задан.")
 
-    client = TelegramClient(StringSession(), api_id, api_hash)
+    session = StringSession()
+    client = TelegramClient(session, api_id, api_hash)
     try:
         await client.connect()
         if await client.is_user_authorized():
@@ -78,6 +79,7 @@ async def request_code(phone: str) -> RequestCodeResult:
         _pending[token] = {
             "phone": phone,
             "phone_code_hash": sent.phone_code_hash,
+            "session_string": session.save(),
             "created_at": time.time(),
         }
         return RequestCodeResult(token=token, error=None)
@@ -103,7 +105,7 @@ async def verify_code(token: str, code: str, password: Optional[str] = None) -> 
     try:
         from telethon import TelegramClient  # type: ignore
         from telethon.sessions import StringSession  # type: ignore
-        from telethon.errors import PhoneCodeInvalidError, SessionPasswordNeededError  # type: ignore
+        from telethon.errors import PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError  # type: ignore
     except Exception:
         return VerifyCodeResult(False, None, "Telethon не установлен.")
 
@@ -118,8 +120,10 @@ async def verify_code(token: str, code: str, password: Optional[str] = None) -> 
 
     phone = str(data.get("phone") or "").strip()
     phone_code_hash = str(data.get("phone_code_hash") or "")
+    pending_session_string = str(data.get("session_string") or "")
 
-    client = TelegramClient(StringSession(), api_id, api_hash)
+    # Reuse the same StringSession that requested the code.
+    client = TelegramClient(StringSession(pending_session_string), api_id, api_hash)
     try:
         await client.connect()
         if password:
@@ -130,6 +134,10 @@ async def verify_code(token: str, code: str, password: Optional[str] = None) -> 
             except SessionPasswordNeededError:
                 await client.disconnect()
                 return VerifyCodeResult(False, None, "NEEDS_PASSWORD")
+            except PhoneCodeExpiredError:
+                del _pending[token]
+                await client.disconnect()
+                return VerifyCodeResult(False, None, "Код истёк. Запросите новый.")
             except PhoneCodeInvalidError:
                 del _pending[token]
                 await client.disconnect()
