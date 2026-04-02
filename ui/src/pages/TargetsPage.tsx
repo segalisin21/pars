@@ -8,7 +8,13 @@ export function TargetsPage() {
   const [busy, setBusy] = useState(false)
 
   const [identifier, setIdentifier] = useState('')
+  const [filter, setFilter] = useState('')
   const canSubmit = useMemo(() => identifier.trim().length > 0, [identifier])
+  const filtered = useMemo(() => {
+    const f = filter.trim().toLowerCase()
+    if (!f) return items ?? []
+    return (items ?? []).filter((x) => x.identifier.toLowerCase().includes(f) || String(x.id).includes(f))
+  }, [items, filter])
 
   async function load() {
     setErr(null)
@@ -82,6 +88,16 @@ export function TargetsPage() {
 
       <section className="card">
         <div className="cardTitle">Список</div>
+        <div className="toolbar" style={{ marginBottom: 10 }}>
+          <label className="field grow">
+            <div className="label">Поиск</div>
+            <input placeholder="id / username" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          </label>
+          <div className="toolbarRight">
+            <span className="badge">всего {items?.length ?? 0}</span>
+            <span className="badge">показано {filtered.length}</span>
+          </div>
+        </div>
         {items === null ? (
           <div className="muted">Загрузка…</div>
         ) : items.length === 0 ? (
@@ -97,7 +113,7 @@ export function TargetsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((t) => (
+              {filtered.map((t) => (
                 <tr key={t.id} className={t.enabled ? '' : 'disabled'}>
                   <td>{t.id}</td>
                   <td className="mono">@{t.identifier}</td>

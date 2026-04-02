@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../lib/api'
+import { api, apiBaseUrl } from '../lib/api'
 import type { InviteRun, Target } from '../lib/api'
 
 export function InvitePage() {
@@ -58,7 +58,17 @@ export function InvitePage() {
         <div className="pageSub">Запуск инвайта и история результатов.</div>
       </div>
 
-      {err ? <div className="banner error">{err}</div> : null}
+      {err ? (
+        <div className="banner error">
+          {err}
+          {err.toLowerCase().includes('failed to fetch') ? (
+            <div className="hint" style={{ marginTop: 8 }}>
+              Не удалось достучаться до API. Проверьте: <code>VITE_API_BASE_URL</code> (сейчас: <code>{apiBaseUrl()}</code>) и
+              CORS (<code>CORS_ALLOWED_ORIGINS</code> на API = URL UI).
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Запуск инвайта</div>
@@ -106,19 +116,49 @@ export function InvitePage() {
                 <th>Статус</th>
                 <th>Цель</th>
                 <th>Старт</th>
-                <th>Статистика</th>
+                <th>Итоги</th>
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
-                <tr key={r.id} className={r.status === 'paused' ? 'warn' : ''}>
-                  <td>{r.id}</td>
-                  <td>{r.status}</td>
-                  <td className="mono">{r.target_id}</td>
-                  <td className="mono">{r.started_at}</td>
-                  <td className="mono small">{JSON.stringify(r.stats)}</td>
-                </tr>
-              ))}
+              {runs.map((r) => {
+                const s: any = r.stats ?? {}
+                const pauseReason = s.pause_reason ? String(s.pause_reason) : null
+                return (
+                  <tr key={r.id} className={r.status === 'paused' ? 'warn' : ''}>
+                    <td className="mono">{r.id}</td>
+                    <td>
+                      <span
+                        className={
+                          r.status === 'succeeded'
+                            ? 'badge ok'
+                            : r.status === 'paused'
+                              ? 'badge warn'
+                              : r.status === 'failed'
+                                ? 'badge err'
+                                : 'badge'
+                        }
+                      >
+                        {r.status}
+                      </span>
+                      {pauseReason ? (
+                        <span className="badge" style={{ marginLeft: 8 }}>
+                          {pauseReason}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="mono small">{r.target_id}</td>
+                    <td className="mono small">{r.started_at}</td>
+                    <td>
+                      <div className="row" style={{ alignItems: 'center' }}>
+                        <span className="badge">attempted {s.attempted ?? 0}</span>
+                        <span className="badge ok">success {s.success ?? 0}</span>
+                        <span className="badge">skipped {s.skipped ?? 0}</span>
+                        <span className="badge err">failed {s.failed ?? 0}</span>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

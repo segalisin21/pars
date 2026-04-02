@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '../lib/api'
+import { api, apiBaseUrl } from '../lib/api'
 import type { CollectRun, Source } from '../lib/api'
 
 export function CollectPage() {
@@ -63,7 +63,17 @@ export function CollectPage() {
         <div className="pageSub">Запуск сбора и история запусков.</div>
       </div>
 
-      {err ? <div className="banner error">{err}</div> : null}
+      {err ? (
+        <div className="banner error">
+          {err}
+          {err.toLowerCase().includes('failed to fetch') ? (
+            <div className="hint" style={{ marginTop: 8 }}>
+              Не удалось достучаться до API. Проверьте: <code>VITE_API_BASE_URL</code> (сейчас: <code>{apiBaseUrl()}</code>) и
+              CORS (<code>CORS_ALLOWED_ORIGINS</code> на API = URL UI).
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="card">
         <div className="cardTitle">Запуск сбора</div>
@@ -109,19 +119,32 @@ export function CollectPage() {
                 <th>Статус</th>
                 <th>Источники</th>
                 <th>Старт</th>
-                <th>Статистика</th>
+                <th>Итоги</th>
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.id}</td>
-                  <td>{r.status}</td>
-                  <td className="mono">{r.source_ids.join(', ')}</td>
-                  <td className="mono">{r.started_at}</td>
-                  <td className="mono small">{JSON.stringify(r.stats)}</td>
-                </tr>
-              ))}
+              {runs.map((r) => {
+                const s: any = r.stats ?? {}
+                return (
+                  <tr key={r.id}>
+                    <td className="mono">{r.id}</td>
+                    <td>
+                      <span className={r.status === 'succeeded' ? 'badge ok' : r.status === 'failed' ? 'badge err' : 'badge'}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="mono small">{r.source_ids.join(', ')}</td>
+                    <td className="mono small">{r.started_at}</td>
+                    <td>
+                      <div className="row" style={{ alignItems: 'center' }}>
+                        <span className="badge">discovered {s.discovered_total ?? 0}</span>
+                        <span className="badge ok">new {s.new_candidates ?? 0}</span>
+                        <span className="badge">updated {s.updated_candidates ?? 0}</span>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}

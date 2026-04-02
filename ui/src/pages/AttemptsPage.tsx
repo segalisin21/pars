@@ -1,0 +1,101 @@
+import { useEffect, useState } from 'react'
+import { api } from '../lib/api'
+import type { InviteAttempt, PageMeta } from '../lib/api'
+import { DataTable } from '../components/DataTable'
+
+export function AttemptsPage() {
+  const [items, setItems] = useState<InviteAttempt[] | null>(null)
+  const [page, setPage] = useState<PageMeta | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const [inviteRunId, setInviteRunId] = useState('')
+  const [candidateId, setCandidateId] = useState('')
+  const [errorCode, setErrorCode] = useState('')
+
+  async function load(next?: { offset?: number }) {
+    setErr(null)
+    const offset = next?.offset ?? page?.offset ?? 0
+    try {
+      const res = await api.listInviteAttempts({
+        invite_run_id: inviteRunId.trim() ? Number(inviteRunId) : undefined,
+        candidate_id: candidateId.trim() ? Number(candidateId) : undefined,
+        error_code: errorCode.trim() || undefined,
+        limit: 50,
+        offset,
+      })
+      setItems(res.items)
+      setPage(res.page)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load')
+      setItems(null)
+      setPage(null)
+    }
+  }
+
+  useEffect(() => {
+    void load({ offset: 0 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const rows = items ?? []
+  const columns = [
+    { key: 'id', header: 'ID', className: 'mono', render: (a: InviteAttempt) => a.id },
+    { key: 'run', header: 'Run', className: 'mono', render: (a: InviteAttempt) => a.invite_run_id },
+    { key: 'target', header: 'Target', className: 'mono', render: (a: InviteAttempt) => a.target_id },
+    { key: 'cand', header: 'Candidate', className: 'mono', render: (a: InviteAttempt) => a.candidate_id },
+    {
+      key: 'status',
+      header: 'Статус',
+      render: (a: InviteAttempt) => {
+        const cls = a.status === 'success' ? 'badge ok' : a.status === 'skipped' ? 'badge' : 'badge err'
+        return <span className={cls}>{a.status}</span>
+      },
+    },
+    { key: 'error', header: 'Ошибка', className: 'mono small', render: (a: InviteAttempt) => a.error_code ?? '—' },
+    { key: 'ts', header: 'Время', className: 'mono small', render: (a: InviteAttempt) => a.attempted_at },
+  ]
+
+  return (
+    <div className="page">
+      <div className="pageHeader">
+        <h1>Попытки</h1>
+        <div className="pageSub">История попыток инвайта по каждому контакту.</div>
+      </div>
+
+      {err ? <div className="banner error">{err}</div> : null}
+
+      <section className="card">
+        <div className="cardTitle">Фильтры</div>
+        <div className="toolbar">
+          <label className="field">
+            <div className="label">Invite run id</div>
+            <input placeholder="например 12" value={inviteRunId} onChange={(e) => setInviteRunId(e.target.value)} />
+          </label>
+          <label className="field">
+            <div className="label">Candidate id</div>
+            <input placeholder="например 55" value={candidateId} onChange={(e) => setCandidateId(e.target.value)} />
+          </label>
+          <label className="field grow">
+            <div className="label">error_code</div>
+            <input placeholder="например flood_wait" value={errorCode} onChange={(e) => setErrorCode(e.target.value)} />
+          </label>
+          <div className="toolbarRight">
+            <button className="btn primary" onClick={() => void load({ offset: 0 })}>
+              Применить
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="cardTitle">Таблица</div>
+        {items === null || page === null ? (
+          <div className="muted">Загрузка…</div>
+        ) : (
+          <DataTable columns={columns} rows={rows} page={page} onPageChange={(p) => void load({ offset: p.offset })} />
+        )}
+      </section>
+    </div>
+  )
+}
+

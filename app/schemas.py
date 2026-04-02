@@ -152,3 +152,93 @@ class TelegramVerifyCodeOut(BaseModel):
     session_string: str | None
     error: str | None
 
+
+class PageMeta(BaseModel):
+    limit: int
+    offset: int
+    total: int
+
+
+class SourceRefOut(BaseModel):
+    id: int
+    type: str
+    identifier: str
+
+
+class CandidateOut(BaseModel):
+    id: int
+    tg_user_id: int | None
+    username: str | None
+    display_name: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+    @field_serializer("first_seen_at", "last_seen_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class CandidateWithSourcesOut(CandidateOut):
+    sources: list[SourceRefOut] = Field(default_factory=list)
+
+
+class CandidatesList(BaseModel):
+    items: list[CandidateWithSourcesOut]
+    page: PageMeta
+
+
+class InviteAttemptOut(BaseModel):
+    id: int
+    invite_run_id: int
+    target_id: int
+    candidate_id: int
+    status: str
+    error_code: str | None
+    attempted_at: datetime
+
+    @field_serializer("attempted_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class InviteAttemptsList(BaseModel):
+    items: list[InviteAttemptOut]
+    page: PageMeta
+
+
+class SuppressionOut(BaseModel):
+    id: int
+    tg_user_id: int | None
+    username: str | None
+    reason: str
+    until: datetime | None
+    created_at: datetime
+
+    @field_serializer("until", "created_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class SuppressionListOut(BaseModel):
+    items: list[SuppressionOut]
+    page: PageMeta
+
+
+class AuditEventOut(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: int | None
+    meta: dict[str, Any]
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class AuditEventsList(BaseModel):
+    items: list[AuditEventOut]
+    page: PageMeta
+
+

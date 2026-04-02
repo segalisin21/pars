@@ -6,6 +6,10 @@ import { InvitePage } from './pages/InvitePage'
 import { SourcesPage } from './pages/SourcesPage'
 import { TargetsPage } from './pages/TargetsPage'
 import { TelegramAuthPage } from './pages/TelegramAuthPage'
+import { CandidatesPage } from './pages/CandidatesPage'
+import { AttemptsPage } from './pages/AttemptsPage'
+import { SuppressionPage } from './pages/SuppressionPage'
+import { AuditPage } from './pages/AuditPage'
 
 function App() {
   return (
@@ -28,6 +32,18 @@ function App() {
           <NavLink to="/invite" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
             Инвайт
           </NavLink>
+          <NavLink to="/candidates" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
+            Контакты
+          </NavLink>
+          <NavLink to="/attempts" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
+            Попытки
+          </NavLink>
+          <NavLink to="/suppression" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
+            Подавления
+          </NavLink>
+          <NavLink to="/audit" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
+            Аудит
+          </NavLink>
           <NavLink to="/telegram-auth" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
             Telegram вход
           </NavLink>
@@ -46,6 +62,10 @@ function App() {
           <Route path="/targets" element={<TargetsPage />} />
           <Route path="/collect" element={<CollectPage />} />
           <Route path="/invite" element={<InvitePage />} />
+          <Route path="/candidates" element={<CandidatesPage />} />
+          <Route path="/attempts" element={<AttemptsPage />} />
+          <Route path="/suppression" element={<SuppressionPage />} />
+          <Route path="/audit" element={<AuditPage />} />
           <Route path="/telegram-auth" element={<TelegramAuthPage />} />
         </Routes>
       </main>
