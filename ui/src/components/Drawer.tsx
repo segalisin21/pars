@@ -1,4 +1,5 @@
-import { ReactNode, useEffect } from 'react'
+import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 
 export function Drawer(props: { open: boolean; title: ReactNode; onClose: () => void; children: ReactNode }) {
   const { open, title, onClose, children } = props
