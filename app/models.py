@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -41,7 +41,7 @@ class CandidateUser(Base):
     __tablename__ = "candidate_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tg_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
@@ -73,7 +73,7 @@ class SuppressionList(Base):
     __tablename__ = "suppression_list"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tg_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     reason: Mapped[str] = mapped_column(String(128), nullable=False)
     until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

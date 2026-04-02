@@ -422,3 +422,22 @@ pytest tests/ -v --tb=short
 ```bash
 pytest tests/ -v --tb=short
 ```
+
+
+## 2026-04-02 (fix: BIGINT for Telegram user ids)
+
+### What changed
+
+- `candidate_users.tg_user_id` and `suppression_list.tg_user_id` use SQLAlchemy `BigInteger` so real Telegram user IDs (often above 2^31) fit in PostgreSQL. Fixes `integer out of range` / `NumericValueOutOfRange` in worker collect runs.
+- `docs/RAILWAY.md`: `ALTER TABLE ... BIGINT` for Postgres volumes created before this schema change.
+
+### Key files
+
+- `app/models.py`
+- `docs/RAILWAY.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```

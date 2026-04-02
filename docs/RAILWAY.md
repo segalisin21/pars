@@ -105,6 +105,17 @@ This typically happens when you run `npm ci` twice in the same build plan (Railp
 Fix:
 - Set the `ui` **Build command** to `npm run build` (do not prefix it with `npm ci && ...`).
 
+### Postgres: `integer out of range` / `NumericValueOutOfRange` on `tg_user_id`
+
+Telegram user IDs can exceed 32-bit signed integer range (~2.1e9). New deployments create `tg_user_id` as `BIGINT`. If your database was created **before** this change and still has `INTEGER` columns, run once (Railway Postgres → Query / `psql`):
+
+```sql
+ALTER TABLE candidate_users ALTER COLUMN tg_user_id TYPE BIGINT;
+ALTER TABLE suppression_list ALTER COLUMN tg_user_id TYPE BIGINT;
+```
+
+Then redeploy `api` and `worker`.
+
 ## 4) Verify
 
 - API health:
