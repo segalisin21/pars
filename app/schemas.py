@@ -131,3 +131,24 @@ class InviteRunOut(BaseModel):
 class InviteRunsList(BaseModel):
     items: list[InviteRunOut]
 
+
+class TelegramRequestCodeIn(BaseModel):
+    phone: str = Field(min_length=3, max_length=32)
+
+
+class TelegramRequestCodeOut(BaseModel):
+    token: str | None
+    error: str | None
+
+
+class TelegramVerifyCodeIn(BaseModel):
+    token: str = Field(min_length=10, max_length=256)
+    code: str = Field(min_length=1, max_length=16)
+    password: str | None = Field(default=None, max_length=256)
+
+
+class TelegramVerifyCodeOut(BaseModel):
+    success: bool
+    session_string: str | None
+    error: str | None
+

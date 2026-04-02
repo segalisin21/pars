@@ -40,6 +40,17 @@ export type InviteRun = {
   stats: Record<string, unknown>
 }
 
+export type TelegramRequestCodeOut = {
+  token: string | null
+  error: string | null
+}
+
+export type TelegramVerifyCodeOut = {
+  success: boolean
+  session_string: string | null
+  error: string | null
+}
+
 function getBaseUrl(): string {
   const v = import.meta.env.VITE_API_BASE_URL as string | undefined
   if (!v) return 'http://127.0.0.1:8000'
@@ -93,5 +104,10 @@ export const api = {
   listInviteRuns: () => request<{ items: InviteRun[] }>('/invite-runs'),
   startInviteRun: (payload: { target_id: number; policy?: Record<string, unknown> }) =>
     request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
+
+  telegramRequestCode: (payload: { phone: string }) =>
+    request<TelegramRequestCodeOut>('/telegram/auth/request_code', { method: 'POST', body: JSON.stringify(payload) }),
+  telegramVerifyCode: (payload: { token: string; code: string; password?: string }) =>
+    request<TelegramVerifyCodeOut>('/telegram/auth/verify_code', { method: 'POST', body: JSON.stringify(payload) }),
 }
 

@@ -264,6 +264,42 @@ Errors:
 #### `GET /invite-runs`
 List invite runs (newest first).
 
+### Telegram auth (v1)
+
+> Purpose: obtain a `TG_SESSION_STRING` (Telethon StringSession) for Railway deployments without terminal login.
+>
+> **Security:** endpoints require `ADMIN_TOKEN`.
+
+#### `POST /telegram/auth/request_code`
+
+Request:
+
+```json
+{ "phone": "+79991234567" }
+```
+
+Response `200`:
+
+```json
+{ "token": "…", "error": null }
+```
+
+#### `POST /telegram/auth/verify_code`
+
+Request:
+
+```json
+{ "token": "…", "code": "12345", "password": null }
+```
+
+Response `200` on success:
+
+```json
+{ "success": true, "session_string": "…", "error": null }
+```
+
+If account has 2FA enabled, response error may be `"NEEDS_PASSWORD"`.
+
 ## Error codes (v1)
 
 ### Validation and not found

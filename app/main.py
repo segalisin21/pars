@@ -26,10 +26,15 @@ from app.schemas import (
     TargetPatch,
     TargetOut,
     TargetsList,
+    TelegramRequestCodeIn,
+    TelegramRequestCodeOut,
+    TelegramVerifyCodeIn,
+    TelegramVerifyCodeOut,
 )
 from app.queue import is_queue_enabled, get_rq_queue
 from app.services import run_collect, run_invite
 from app.telegram_client import TelegramClient
+from app.telegram_auth_web import request_code as tg_request_code, verify_code as tg_verify_code
 from app.worker_jobs import execute_collect_run, execute_invite_run
 
 
@@ -355,6 +360,16 @@ def create_app(
             finished_at=run.finished_at,
             stats=run.stats,
         )
+
+    @app.post("/telegram/auth/request_code", response_model=TelegramRequestCodeOut)
+    async def telegram_request_code(payload: TelegramRequestCodeIn, _auth=Depends(verify_admin_token)):
+        r = await tg_request_code(payload.phone)
+        return TelegramRequestCodeOut(token=r.token, error=r.error)
+
+    @app.post("/telegram/auth/verify_code", response_model=TelegramVerifyCodeOut)
+    async def telegram_verify_code(payload: TelegramVerifyCodeIn, _auth=Depends(verify_admin_token)):
+        r = await tg_verify_code(payload.token, payload.code, password=payload.password)
+        return TelegramVerifyCodeOut(success=r.success, session_string=r.session_string, error=r.error)
 
     return app
 

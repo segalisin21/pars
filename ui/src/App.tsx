@@ -5,6 +5,7 @@ import { CollectPage } from './pages/CollectPage'
 import { InvitePage } from './pages/InvitePage'
 import { SourcesPage } from './pages/SourcesPage'
 import { TargetsPage } from './pages/TargetsPage'
+import { TelegramAuthPage } from './pages/TelegramAuthPage'
 
 function App() {
   return (
@@ -27,6 +28,9 @@ function App() {
           <NavLink to="/invite" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
             Инвайт
           </NavLink>
+          <NavLink to="/telegram-auth" className={({ isActive }) => (isActive ? 'navItem active' : 'navItem')}>
+            Telegram вход
+          </NavLink>
         </nav>
         <div className="sidebarFooter">
           <div className="hint">
@@ -42,6 +46,7 @@ function App() {
           <Route path="/targets" element={<TargetsPage />} />
           <Route path="/collect" element={<CollectPage />} />
           <Route path="/invite" element={<InvitePage />} />
+          <Route path="/telegram-auth" element={<TelegramAuthPage />} />
         </Routes>
       </main>
     </div>
