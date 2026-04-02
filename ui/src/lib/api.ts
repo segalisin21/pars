@@ -12,6 +12,9 @@ export type Source = {
   identifier: string
   enabled: boolean
   notes: string | null
+  telegram_title: string | null
+  telegram_participants_count: number | null
+  telegram_meta_updated_at: string | null
 }
 
 export type Target = {
@@ -221,6 +224,26 @@ export const api = {
     const r = await request<Source>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
     invalidateSourcesListCache()
     return r
+  },
+  refreshSourceTelegramMeta: async (id: number) => {
+    const url = `${getBaseUrl()}/sources/${id}/refresh_telegram_meta`
+    const headers = new Headers()
+    headers.set('Content-Type', 'application/json')
+    const token = getAdminToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    headers.set('X-Workspace-Id', getWorkspaceIdHeader())
+    const res = await fetch(url, { method: 'POST', headers })
+    const text = await res.text()
+    const json = parseJson(text)
+    if (!res.ok) {
+      const err = json as Partial<ApiError> | null
+      const msg = err?.error?.message || text || `HTTP ${res.status}`
+      const code = err?.error?.code
+      const details = err?.error?.details && typeof err.error.details === 'object' ? err.error.details : {}
+      throw new ApiRequestError(msg, res.status, code, details as Record<string, unknown>)
+    }
+    invalidateSourcesListCache()
+    return json as Source
   },
 
   listTargets: () => request<{ items: Target[] }>('/targets'),

@@ -117,7 +117,30 @@ def upsert_candidate(db: Session, workspace_id: int, tg: TgUser) -> CandidateUse
         return existing
 
 
-def link_candidate_to_source(db: Session, workspace_id: int, candidate_id: int, source_id: int) -> None:
+def _find_existing_candidate_id(db: Session, workspace_id: int, u: TgUser) -> int | None:
+    if u.tg_user_id is not None:
+        cid = db.scalar(
+            select(CandidateUser.id).where(
+                CandidateUser.workspace_id == workspace_id,
+                CandidateUser.tg_user_id == u.tg_user_id,
+            )
+        )
+        if cid is not None:
+            return int(cid)
+    uname = normalize_username(u.username)
+    if uname is not None:
+        cid = db.scalar(
+            select(CandidateUser.id).where(
+                CandidateUser.workspace_id == workspace_id,
+                CandidateUser.username == uname,
+            )
+        )
+        if cid is not None:
+            return int(cid)
+    return None
+
+
+def link_candidate_to_source(db: Session, workspace_id: int, candidate_id: int, source_id: int) -> bool:
     link = db.scalar(
         select(CandidateSourceLink).where(
             and_(
@@ -135,6 +158,8 @@ def link_candidate_to_source(db: Session, workspace_id: int, candidate_id: int, 
                 source_id=source_id,
             )
         )
+        return True
+    return False
 
 
 def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun) -> CollectRun:
@@ -153,6 +178,7 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     new_candidates = 0
     updated_candidates = 0
     last_commit_at = 0
+    by_source_id: dict[str, dict[str, int]] = {}
 
     def _flush_progress(*, force: bool = False) -> None:
         nonlocal last_commit_at
@@ -163,6 +189,7 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             "new_candidates": new_candidates,
             "updated_candidates": updated_candidates,
             "skipped": 0,
+            "by_source_id": by_source_id,
         }
         db.flush()
         db.commit()
@@ -177,20 +204,16 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
         if not src.enabled:
             continue
 
+        sk = str(sid)
+        by_source_id[sk] = {"discovered": 0, "new_candidates": 0, "updated_candidates": 0, "new_source_links": 0}
+
         for u in tg_client.iter_participants(src.identifier):
             discovered_total += 1
-            before_id = None
-            if u.tg_user_id is not None:
-                existing = db.scalar(
-                    select(CandidateUser.id).where(
-                        CandidateUser.workspace_id == workspace_id,
-                        CandidateUser.tg_user_id == u.tg_user_id,
-                    )
-                )
-                before_id = existing
+            by_source_id[sk]["discovered"] += 1
+            before_cand_id = _find_existing_candidate_id(db, workspace_id, u)
             try:
                 cand = upsert_candidate(db, workspace_id, u)
-                link_candidate_to_source(db, workspace_id, cand.id, src.id)
+                link_new = link_candidate_to_source(db, workspace_id, cand.id, src.id)
             except DataError as e:
                 uid = u.tg_user_id
                 orig_name = type(e.orig).__name__ if e.orig else None
@@ -204,11 +227,16 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
                     exc_info=True,
                 )
                 raise
-            if before_id is None and (u.tg_user_id is not None or normalize_username(u.username) is not None):
-                if cand.first_seen_at == cand.last_seen_at:
+            if link_new:
+                by_source_id[sk]["new_source_links"] += 1
+            has_id = u.tg_user_id is not None or normalize_username(u.username) is not None
+            if has_id:
+                if before_cand_id is None:
                     new_candidates += 1
+                    by_source_id[sk]["new_candidates"] += 1
                 else:
                     updated_candidates += 1
+                    by_source_id[sk]["updated_candidates"] += 1
 
             if discovered_total % progress_every == 0:
                 logger.info(
@@ -229,9 +257,29 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
         "new_candidates": new_candidates,
         "updated_candidates": updated_candidates,
         "skipped": 0,
+        "by_source_id": by_source_id,
     }
     db.flush()
     return run
+
+
+def refresh_source_telegram_meta(
+    db: Session,
+    workspace_id: int,
+    source_id: int,
+    tg_client: TelegramClient,
+) -> Source | None:
+    src = db.get(Source, source_id)
+    if src is None or src.workspace_id != workspace_id:
+        return None
+    meta = tg_client.fetch_source_meta(src.identifier)
+    if meta is None:
+        return src
+    src.telegram_title = meta.title
+    src.telegram_participants_count = meta.participants_count
+    src.telegram_meta_updated_at = utcnow()
+    db.flush()
+    return src
 
 
 def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int], workspace_id: int) -> CollectRun:

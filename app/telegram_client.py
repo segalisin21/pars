@@ -5,6 +5,14 @@ from typing import Iterable
 
 
 @dataclass(frozen=True)
+class SourceTelegramMeta:
+    """Resolved Telegram metadata for a source (channel/chat title and subscriber/member count)."""
+
+    title: str | None
+    participants_count: int | None
+
+
+@dataclass(frozen=True)
 class TgUser:
     tg_user_id: int | None
     username: str | None = None
@@ -26,4 +34,8 @@ class TelegramClient:
 
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         raise NotImplementedError
+
+    def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
+        """Return title and participants_count when supported; None if unavailable (noop client)."""
+        return None
 

@@ -97,6 +97,13 @@ Statuses (suggested)
 4. Service upserts candidates and provenance links.
 5. CollectRun stores summary metrics (discovered, new, updated, skipped).
 
+### Telegram: subscriber count vs collectible participants
+
+- **Subscriber / member count** shown in the Telegram client (and returned by `GetFullChannel` as `participants_count`) is an **aggregate** from Telegram. It does **not** guarantee that the user session can enumerate that many distinct users via `iter_participants`.
+- **Broadcast channels** often expose **only a subset** of members to non-admin accounts (or cap iteration around ~10k in practice). **Admin rights** on the entity improve visibility where the API allows listing.
+- **Stored metadata** on `Source` (`telegram_title`, `telegram_participants_count`, `telegram_meta_updated_at`) is for **operator context and analytics**; it must not be read as “we collected this many rows.”
+- **Repeat collects** over the same source mostly **update** existing `CandidateUser` rows (`updated_candidates`); `new_candidates` grows only for users **first seen** in the workspace on that run.
+
 ### Flow C: Gradual invite into target
 
 1. Admin starts an **InviteRun** with `target_id` and a pacing policy.

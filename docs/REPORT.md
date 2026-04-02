@@ -61,11 +61,25 @@ All non-2xx responses use:
   "type": "group",
   "identifier": "@somegroup",
   "enabled": true,
-  "notes": "optional"
+  "notes": "optional",
+  "telegram_title": "Public title or null",
+  "telegram_participants_count": 54000,
+  "telegram_meta_updated_at": "2026-04-02T12:00:00Z"
 }
 ```
 
 `type` values: `group` | `chat` | `channel`
+
+`telegram_*` fields are filled when **Telegram metadata** is refreshed (see `POST /sources/{id}/refresh_telegram_meta`). `telegram_participants_count` comes from Telegram’s channel/group full info; it **may exceed** the number of users the same session can enumerate into candidates.
+
+#### `POST /sources/{id}/refresh_telegram_meta`
+
+Requires `Authorization: Bearer` when `ADMIN_TOKEN` is set.
+
+- **Synchronous** (no `REDIS_URL`): resolves entity via the API process’s Telegram client (noop in default API deploy → fields stay unchanged).
+- **Asynchronous** (`REDIS_URL` set): returns **202** with the current `Source` JSON; the **worker** updates metadata after Telethon resolves the entity.
+
+Audit action: `source.refresh_telegram_meta` (sync path only).
 
 ### InviteTarget
 
@@ -91,12 +105,22 @@ All non-2xx responses use:
     "discovered_total": 120,
     "new_candidates": 80,
     "updated_candidates": 40,
-    "skipped": 0
+    "skipped": 0,
+    "by_source_id": {
+      "1": {
+        "discovered": 120,
+        "new_candidates": 80,
+        "updated_candidates": 40,
+        "new_source_links": 80
+      }
+    }
   }
 }
 ```
 
 `status` values: `queued` | `running` | `succeeded` | `failed` | `cancelled`
+
+`by_source_id` keys are stringified internal `source_id` values. `new_source_links` counts new rows in `candidate_source_links` for that source during the run.
 
 ### InviteRun
 

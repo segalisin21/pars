@@ -162,9 +162,24 @@ export function CollectPage() {
                   className={selectedIds.has(s.id) ? 'chip selected' : 'chip'}
                   onClick={() => toggle(s.id)}
                   disabled={busy}
-                  title={`@${s.identifier}`}
+                  title={
+                    [
+                      s.telegram_title,
+                      s.telegram_participants_count != null
+                        ? `~${s.telegram_participants_count.toLocaleString()} подписчиков (из API; сбор может дать меньше)`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || `@${s.identifier}`
+                  }
                 >
-                  #{s.id} @{s.identifier}
+                  <span>
+                    #{s.id} @{s.identifier}
+                  </span>
+                  {s.telegram_title ? <span className="chipSub">{s.telegram_title}</span> : null}
+                  {s.telegram_participants_count != null ? (
+                    <span className="chipSub">~{s.telegram_participants_count.toLocaleString()} в канале</span>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -212,11 +227,19 @@ export function CollectPage() {
                     <td className="mono small">{r.source_ids.join(', ')}</td>
                     <td className="mono small">{r.started_at}</td>
                     <td>
-                      <div className="row" style={{ alignItems: 'center' }}>
+                      <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className="badge">discovered {String(s.discovered_total ?? 0)}</span>
                         <span className="badge ok">new {String(s.new_candidates ?? 0)}</span>
                         <span className="badge">updated {String(s.updated_candidates ?? 0)}</span>
                       </div>
+                      {s.by_source_id && typeof s.by_source_id === 'object' ? (
+                        <div className="mono small muted" style={{ marginTop: 6 }}>
+                          по источникам:{' '}
+                          {Object.entries(s.by_source_id as Record<string, { discovered?: number; new_candidates?: number }>)
+                            .map(([id, st]) => `#${id}: d${st.discovered ?? 0} n${st.new_candidates ?? 0}`)
+                            .join(' · ')}
+                        </div>
+                      ) : null}
                     </td>
                   </tr>
                 )

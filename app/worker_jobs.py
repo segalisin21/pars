@@ -7,8 +7,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import Base
-from app.models import CollectRun, InviteRun
-from app.services import process_collect_run, process_invite_run
+from app.models import CollectRun, InviteRun, Source
+from app.services import process_collect_run, process_invite_run, refresh_source_telegram_meta
 from app.telegram_client import TelegramClient
 from app.telethon_client import TelethonTelegramClient
 
@@ -48,6 +48,9 @@ def _get_tg_client() -> TelegramClient:
                 return []
 
             def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
+                return None
+
+            def fetch_source_meta(self, source_identifier: str):
                 return None
 
         return _NoopTelegramClient()
@@ -121,6 +124,21 @@ def execute_invite_run(*, run_id: int) -> None:
             raise
         finally:
             db.commit()
+    finally:
+        db.close()
+
+
+def execute_refresh_source_meta(*, source_id: int) -> None:
+    session_factory = _get_session_factory()
+    tg = _get_tg_client()
+    db = session_factory()
+    try:
+        src = db.get(Source, source_id)
+        if src is None:
+            return
+        refresh_source_telegram_meta(db, src.workspace_id, source_id, tg)
+        db.commit()
+        logger.info("refresh_source_meta done source_id=%s tg_client=%s", source_id, _tg_client_mode(tg))
     finally:
         db.close()
 

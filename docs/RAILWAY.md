@@ -153,6 +153,14 @@ After a successful run, redeploy or restart `api` (usually not required). **`wor
 
 > If this database was created **from scratch** after the workspace change, `Base.metadata.create_all` already created the new tables — you do **not** need this script.
 
+### Postgres: source Telegram metadata columns
+
+If the API predates **source Telegram metadata** (`telegram_title`, `telegram_participants_count`, `telegram_meta_updated_at`), run once:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migrate_source_telegram_meta_pg.sql
+```
+
 ### Worker: collect job times out (`JobTimeoutException: ... 180 seconds`)
 
 If collect runs against large groups/channels, fetching participants can take minutes. Increase RQ job timeouts on `worker`:

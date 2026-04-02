@@ -54,10 +54,10 @@ from app.schemas import (
     TelegramVerifyCodeOut,
 )
 from app.queue import is_queue_enabled, get_rq_queue
-from app.services import run_collect, run_invite
+from app.services import refresh_source_telegram_meta, run_collect, run_invite
 from app.telegram_client import TelegramClient
 from app.telegram_auth_web import request_code as tg_request_code, verify_code as tg_verify_code
-from app.worker_jobs import execute_collect_run, execute_invite_run
+from app.worker_jobs import execute_collect_run, execute_invite_run, execute_refresh_source_meta
 
 
 def _rq_timeout_seconds(env_var: str, default_seconds: int) -> int:
@@ -151,6 +151,18 @@ def create_app(
     get_db = make_get_db(session_factory)
     get_tg = make_get_tg(tg_client)
 
+    def source_row_out(s: Source) -> SourceOut:
+        return SourceOut(
+            id=s.id,
+            type=s.type,
+            identifier=s.identifier,
+            enabled=s.enabled,
+            notes=s.notes,
+            telegram_title=s.telegram_title,
+            telegram_participants_count=s.telegram_participants_count,
+            telegram_meta_updated_at=s.telegram_meta_updated_at,
+        )
+
     def verify_admin_token(request: Request):
         # Local-dev convenience: if ADMIN_TOKEN is not set, skip auth.
         if not admin_token:
@@ -194,17 +206,12 @@ def create_app(
             )
         )
         db.commit()
-        return SourceOut(id=src.id, type=src.type, identifier=src.identifier, enabled=src.enabled, notes=src.notes)
+        return source_row_out(src)
 
     @app.get("/sources", response_model=SourcesList)
     def list_sources(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
         items = db.scalars(select(Source).where(Source.workspace_id == workspace_id).order_by(Source.id.asc())).all()
-        return SourcesList(
-            items=[
-                SourceOut(id=s.id, type=s.type, identifier=s.identifier, enabled=s.enabled, notes=s.notes)
-                for s in items
-            ]
-        )
+        return SourcesList(items=[source_row_out(s) for s in items])
 
     @app.patch("/sources/{source_id}", response_model=SourceOut)
     def patch_source(
@@ -236,7 +243,47 @@ def create_app(
             )
         )
         db.commit()
-        return SourceOut(id=src.id, type=src.type, identifier=src.identifier, enabled=src.enabled, notes=src.notes)
+        return source_row_out(src)
+
+    @app.post("/sources/{source_id}/refresh_telegram_meta")
+    def refresh_source_telegram_meta_route(
+        source_id: int,
+        db: Session = Depends(get_db),
+        tg: TelegramClient = Depends(get_tg),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        src = db.get(Source, source_id)
+        if src is None or src.workspace_id != workspace_id:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": source_id}}},
+            )
+        if is_queue_enabled():
+            q = get_rq_queue()
+            q.enqueue(
+                execute_refresh_source_meta,
+                source_id=source_id,
+                job_timeout=120,
+            )
+            return JSONResponse(
+                status_code=202,
+                content=source_row_out(src).model_dump(mode="json"),
+            )
+        refresh_source_telegram_meta(db, workspace_id, source_id, tg)
+        db.commit()
+        db.refresh(src)
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="source.refresh_telegram_meta",
+                entity_type="source",
+                entity_id=src.id,
+                meta={},
+            )
+        )
+        db.commit()
+        return source_row_out(src)
 
     @app.post("/targets", response_model=TargetOut, status_code=201)
     def create_target(

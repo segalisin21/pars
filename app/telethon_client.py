@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Iterable
 
-from app.telegram_client import FloodWaitError, TelegramClient, TgUser
+from app.telegram_client import FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,36 @@ class TelethonTelegramClient(TelegramClient):
                 )
         except _TelethonFloodWait as e:  # pragma: no cover (network)
             raise FloodWaitError(int(getattr(e, "seconds", 0)))
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+    def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+            from telethon.tl.functions.channels import GetFullChannelRequest  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Telethon is not installed") from e
+
+        ident = _normalize_identifier(source_identifier)
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            entity = client.get_entity(ident)
+            title = getattr(entity, "title", None)
+            participants_count: int | None = getattr(entity, "participants_count", None)
+            if participants_count is None and (
+                getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False)
+            ):
+                full = client(GetFullChannelRequest(channel=entity))
+                pc = getattr(full.full_chat, "participants_count", None)
+                participants_count = int(pc) if pc is not None else None
+            return SourceTelegramMeta(title=title, participants_count=participants_count)
+        except Exception:
+            return None
         finally:
             try:
                 client.disconnect()

@@ -41,6 +41,13 @@ class SourceOut(BaseModel):
     identifier: str
     enabled: bool
     notes: str | None
+    telegram_title: str | None = None
+    telegram_participants_count: int | None = None
+    telegram_meta_updated_at: datetime | None = None
+
+    @field_serializer("telegram_meta_updated_at")
+    def ser_meta_ts(self, v: datetime | None) -> str | None:
+        return iso_utc_z(v)
 
 
 class SourcesList(BaseModel):

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.db import Base, create_session_factory
 from app.main import create_app
 from app.models import Workspace
-from app.telegram_client import FloodWaitError, TelegramClient, TgUser
+from app.telegram_client import FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
 
 
 class FakeTelegramClient(TelegramClient):
@@ -17,6 +17,7 @@ class FakeTelegramClient(TelegramClient):
         self.invite_calls: list[tuple[str, int]] = []
         self.participants_by_source: dict[str, list[TgUser]] = {}
         self.flood_on_user_ids: set[int] = set()
+        self.source_meta_by_key: dict[str, SourceTelegramMeta] = {}
 
     def iter_participants(self, source_identifier: str):
         yield from list(self.participants_by_source.get(source_identifier, []))
@@ -28,6 +29,10 @@ class FakeTelegramClient(TelegramClient):
         self.invite_calls.append((target_identifier, tg_user_id))
         if tg_user_id in self.flood_on_user_ids:
             raise FloodWaitError(60)
+
+    def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
+        k = source_identifier.strip().removeprefix("@").lower()
+        return self.source_meta_by_key.get(k)
 
 
 @pytest.fixture()

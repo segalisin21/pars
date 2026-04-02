@@ -33,6 +33,10 @@ class Source(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    telegram_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    telegram_participants_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_meta_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     workspace: Mapped[Workspace] = relationship()
 
     __table_args__ = (UniqueConstraint("workspace_id", "type", "identifier", name="uq_source_workspace_type_identifier"),)

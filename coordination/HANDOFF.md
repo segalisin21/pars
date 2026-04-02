@@ -618,3 +618,28 @@ cd ui && npm run lint && npm run build
 - Stale sources list for up to 30s after mutations from another tab/client until TTL expires or user mutates via this client (create/patch invalidate).
 
 - Pushed: `git push origin master:test` (`5590f18..1cf0759`).
+
+
+## 2026-04-02 (feat: source Telegram metadata + collect stats by source)
+
+### What changed
+
+- **Model `Source`:** `telegram_title`, `telegram_participants_count`, `telegram_meta_updated_at`.
+- **`TelegramClient.fetch_source_meta`:** `TelethonTelegramClient` uses `GetFullChannelRequest` for broadcast/megagroup; base returns `None`.
+- **API:** `POST /sources/{id}/refresh_telegram_meta` — sync refresh when no queue; **202** + RQ job `execute_refresh_source_meta` when `REDIS_URL` set.
+- **`process_collect_run`:** `new`/`updated` use pre-upsert existence check; `stats.by_source_id` per source; `link_candidate_to_source` returns bool; `new_source_links` per source.
+- **Scripts:** `scripts/migrate_source_telegram_meta_pg.sql`.
+- **UI:** Sources table + «Обновить из TG»; Collect chips show title/subscriber hint; run history shows `by_source_id` summary.
+- **Docs:** `docs/DESIGN.md`, `docs/REPORT.md`, `docs/RAILWAY.md`.
+- **Tests:** `tests/test_source_meta_and_recollect.py`.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Default API deploy (noop Telegram) does not fill meta until **worker** runs refresh or queue handles job; `participants_count` from Telegram still may exceed iterable participant count.
