@@ -103,12 +103,17 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
   "finished_at": null,
   "stats": {
     "discovered_total": 120,
+    "discovered_from_participants": 100,
+    "discovered_from_messages": 20,
+    "collect_mode": "both",
     "new_candidates": 80,
     "updated_candidates": 40,
     "skipped": 0,
     "by_source_id": {
       "1": {
         "discovered": 120,
+        "discovered_participants": 100,
+        "discovered_messages": 20,
         "new_candidates": 80,
         "updated_candidates": 40,
         "new_source_links": 80
@@ -121,6 +126,8 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
 `status` values: `queued` | `running` | `succeeded` | `failed` | `cancelled`
 
 `by_source_id` keys are stringified internal `source_id` values. `new_source_links` counts new rows in `candidate_source_links` for that source during the run.
+
+**Collect worker environment (not HTTP):** `COLLECT_MODE` = `participants` | `messages` | `both` | `auto` (default `participants`). `COLLECT_MESSAGE_SCAN_LIMIT` = max messages to scan per source when message collection runs (default `5000`, clamped server-side). These apply to the **worker** process that executes `process_collect_run`; the API only starts runs.
 
 ### InviteRun
 

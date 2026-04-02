@@ -90,12 +90,17 @@ Statuses (suggested)
 ### Flow B: Collect candidates
 
 1. Admin starts a **CollectRun** with selected `source_ids`.
-2. Worker resolves each source and queries the Telegram client for participants where feasible.
-3. Service validates and normalizes user records:
+2. Worker resolves each source and queries the Telegram client according to **`COLLECT_MODE`** (worker env):
+   - **`participants`** (default): `iter_participants` only — same as historical v1 behavior.
+   - **`messages`**: scan recent message history and upsert **senders** (users who posted). Useful when the member list is hidden or empty for the session but chat history is readable.
+   - **`both`**: participants first, then message senders **deduped** by `tg_user_id` / normalized username so the same person is not double-counted across the two passes.
+   - **`auto`**: run participants first; if that yields **zero** participant rows for a source, run the message scan for that source (fallback for hidden lists).
+3. Message history is bounded by **`COLLECT_MESSAGE_SCAN_LIMIT`** (max messages to walk, newest-first); deep history means more API calls and FloodWait risk.
+4. Service validates and normalizes user records:
    - store `tg_user_id` if present
    - normalize `username` to lowercase when present
-4. Service upserts candidates and provenance links.
-5. CollectRun stores summary metrics (discovered, new, updated, skipped).
+5. Service upserts candidates and provenance links.
+6. CollectRun stores summary metrics (`discovered_total`, `discovered_from_participants`, `discovered_from_messages`, `collect_mode`, new/updated, `by_source_id` breakdown).
 
 ### Telegram: subscriber count vs collectible participants
 
@@ -103,6 +108,7 @@ Statuses (suggested)
 - **Broadcast channels** often expose **only a subset** of members to non-admin accounts (or cap iteration around ~10k in practice). **Admin rights** on the entity improve visibility where the API allows listing.
 - **Stored metadata** on `Source` (`telegram_title`, `telegram_participants_count`, `telegram_meta_updated_at`) is for **operator context and analytics**; it must not be read as “we collected this many rows.”
 - **Repeat collects** over the same source mostly **update** existing `CandidateUser` rows (`updated_candidates`); `new_candidates` grows only for users **first seen** in the workspace on that run.
+- **Message-based collection** only sees users who **sent user messages** in the scanned window — not lurkers. **Broadcast channels** usually do not yield subscriber identities from messages (posts are from the channel). **Bots** are skipped when inferring senders from history.
 
 ### Flow C: Gradual invite into target
 

@@ -16,11 +16,19 @@ class FakeTelegramClient(TelegramClient):
     def __init__(self):
         self.invite_calls: list[tuple[str, int]] = []
         self.participants_by_source: dict[str, list[TgUser]] = {}
+        self.message_senders_by_source: dict[str, list[TgUser]] = {}
         self.flood_on_user_ids: set[int] = set()
         self.source_meta_by_key: dict[str, SourceTelegramMeta] = {}
 
     def iter_participants(self, source_identifier: str):
         yield from list(self.participants_by_source.get(source_identifier, []))
+
+    def iter_users_from_messages(self, source_identifier: str, *, limit=None, min_date=None):
+        _ = min_date
+        rows = list(self.message_senders_by_source.get(source_identifier, []))
+        if limit is not None and limit > 0:
+            rows = rows[:limit]
+        yield from rows
 
     def get_participants(self, source_identifier: str) -> list[TgUser]:
         return list(self.iter_participants(source_identifier))

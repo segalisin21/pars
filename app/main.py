@@ -143,6 +143,9 @@ def create_app(
             def get_participants(self, source_identifier: str):
                 return []
 
+            def iter_users_from_messages(self, source_identifier: str, *, limit=None, min_date=None):
+                return iter(())
+
             def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
                 return None
 

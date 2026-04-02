@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable
 
 
@@ -38,4 +39,14 @@ class TelegramClient:
     def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
         """Return title and participants_count when supported; None if unavailable (noop client)."""
         return None
+
+    def iter_users_from_messages(
+        self,
+        source_identifier: str,
+        *,
+        limit: int | None = None,
+        min_date: datetime | None = None,
+    ) -> Iterable[TgUser]:
+        """Yield users inferred from message senders (supergroups/chats). Default: none (noop)."""
+        return iter(())
 

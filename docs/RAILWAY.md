@@ -68,6 +68,8 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
   - `COLLECT_BATCH_SIZE` = `300` (how often we commit progress during collect)
   - `COLLECT_PROGRESS_EVERY` = `500` (how often we log progress during collect)
+  - `COLLECT_MODE` = `participants` (default) | `messages` | `both` | `auto` — whether to collect from member list, recent message senders, both (deduped), or auto-fallback to messages when the participant list is empty
+  - `COLLECT_MESSAGE_SCAN_LIMIT` = `5000` (max messages to walk per source when message collection runs; increase with care — more FloodWait risk)
 
 > Note: on startup the worker will automatically create DB tables (v1) if they don't exist yet.
 

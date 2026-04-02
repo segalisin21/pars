@@ -134,6 +134,28 @@ export function CollectPage() {
                 Источники: {focusedRun.source_ids.join(', ')}
               </div>
               <div className="mono small">Старт: {focusedRun.started_at}</div>
+              {focusedRun.stats && typeof focusedRun.stats === 'object' ? (
+                <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {typeof (focusedRun.stats as { collect_mode?: string }).collect_mode === 'string' ? (
+                    <span className="badge muted">{(focusedRun.stats as { collect_mode: string }).collect_mode}</span>
+                  ) : null}
+                  <span className="badge">
+                    discovered{' '}
+                    {String((focusedRun.stats as { discovered_total?: number }).discovered_total ?? 0)}
+                  </span>
+                  <span className="badge muted">
+                    p/m{' '}
+                    {String((focusedRun.stats as { discovered_from_participants?: number }).discovered_from_participants ?? 0)}/
+                    {String((focusedRun.stats as { discovered_from_messages?: number }).discovered_from_messages ?? 0)}
+                  </span>
+                  <span className="badge ok">
+                    new {String((focusedRun.stats as { new_candidates?: number }).new_candidates ?? 0)}
+                  </span>
+                  <span className="badge">
+                    updated {String((focusedRun.stats as { updated_candidates?: number }).updated_candidates ?? 0)}
+                  </span>
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="muted">Запуск не найден или не загружен.</div>
@@ -228,15 +250,41 @@ export function CollectPage() {
                     <td className="mono small">{r.started_at}</td>
                     <td>
                       <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                        {typeof s.collect_mode === 'string' ? (
+                          <span className="badge muted" title="COLLECT_MODE на воркере">
+                            {s.collect_mode}
+                          </span>
+                        ) : null}
                         <span className="badge">discovered {String(s.discovered_total ?? 0)}</span>
+                        {typeof s.discovered_from_participants === 'number' || typeof s.discovered_from_messages === 'number' ? (
+                          <span className="badge muted" title="участники / сообщения">
+                            p/m {String(s.discovered_from_participants ?? 0)}/{String(s.discovered_from_messages ?? 0)}
+                          </span>
+                        ) : null}
                         <span className="badge ok">new {String(s.new_candidates ?? 0)}</span>
                         <span className="badge">updated {String(s.updated_candidates ?? 0)}</span>
                       </div>
                       {s.by_source_id && typeof s.by_source_id === 'object' ? (
                         <div className="mono small muted" style={{ marginTop: 6 }}>
                           по источникам:{' '}
-                          {Object.entries(s.by_source_id as Record<string, { discovered?: number; new_candidates?: number }>)
-                            .map(([id, st]) => `#${id}: d${st.discovered ?? 0} n${st.new_candidates ?? 0}`)
+                          {Object.entries(
+                            s.by_source_id as Record<
+                              string,
+                              {
+                                discovered?: number
+                                discovered_participants?: number
+                                discovered_messages?: number
+                                new_candidates?: number
+                              }
+                            >,
+                          )
+                            .map(([id, st]) => {
+                              const dp = st.discovered_participants
+                              const dm = st.discovered_messages
+                              const extra =
+                                dp != null || dm != null ? ` p${dp ?? 0}/m${dm ?? 0}` : ''
+                              return `#${id}: d${st.discovered ?? 0}${extra} n${st.new_candidates ?? 0}`
+                            })
                             .join(' · ')}
                         </div>
                       ) : null}

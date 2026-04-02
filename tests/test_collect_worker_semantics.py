@@ -33,6 +33,9 @@ def test_process_collect_run_updates_existing_run(session_factory, fake_tg):
     db.refresh(run)
     assert run.status == "succeeded"
     assert run.stats["discovered_total"] == 2
+    assert run.stats["discovered_from_participants"] == 2
+    assert run.stats["discovered_from_messages"] == 0
+    assert run.stats.get("collect_mode") == "participants"
 
 
 def test_process_invite_run_updates_existing_run(session_factory, fake_tg):

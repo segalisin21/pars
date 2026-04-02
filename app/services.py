@@ -43,6 +43,22 @@ def _int_env(name: str, default: int, *, min_value: int = 1, max_value: int | No
     return v
 
 
+def _collect_mode() -> str:
+    v = (os.getenv("COLLECT_MODE") or "participants").strip().lower()
+    if v in {"participants", "messages", "both", "auto"}:
+        return v
+    return "participants"
+
+
+def _collect_user_dedupe_key(u: TgUser) -> object:
+    if u.tg_user_id is not None:
+        return ("i", int(u.tg_user_id))
+    uname = normalize_username(u.username)
+    if uname is not None:
+        return ("n", uname)
+    return ("e", id(u))
+
+
 def normalize_username(username: str | None) -> str | None:
     if username is None:
         return None
@@ -166,6 +182,8 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     workspace_id = run.workspace_id
     batch_size = _int_env("COLLECT_BATCH_SIZE", 300, min_value=1, max_value=5000)
     progress_every = _int_env("COLLECT_PROGRESS_EVERY", 500, min_value=1, max_value=50_000)
+    collect_mode = _collect_mode()
+    message_scan_limit = _int_env("COLLECT_MESSAGE_SCAN_LIMIT", 5000, min_value=1, max_value=500_000)
 
     run.status = "running"
     run.started_at = utcnow()
@@ -175,6 +193,8 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     db.flush()
 
     discovered_total = 0
+    discovered_from_participants = 0
+    discovered_from_messages = 0
     new_candidates = 0
     updated_candidates = 0
     last_commit_at = 0
@@ -186,6 +206,9 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             return
         run.stats = {
             "discovered_total": discovered_total,
+            "discovered_from_participants": discovered_from_participants,
+            "discovered_from_messages": discovered_from_messages,
+            "collect_mode": collect_mode,
             "new_candidates": new_candidates,
             "updated_candidates": updated_candidates,
             "skipped": 0,
@@ -194,6 +217,61 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
         db.flush()
         db.commit()
         last_commit_at = discovered_total
+
+    def _ingest_user(u: TgUser, sk: str, source_id: int, channel: str) -> None:
+        nonlocal discovered_total, new_candidates, updated_candidates
+        nonlocal discovered_from_participants, discovered_from_messages
+
+        if channel == "participants":
+            discovered_from_participants += 1
+            by_source_id[sk]["discovered_participants"] += 1
+        else:
+            discovered_from_messages += 1
+            by_source_id[sk]["discovered_messages"] += 1
+        by_source_id[sk]["discovered"] = (
+            by_source_id[sk]["discovered_participants"] + by_source_id[sk]["discovered_messages"]
+        )
+        discovered_total += 1
+
+        before_cand_id = _find_existing_candidate_id(db, workspace_id, u)
+        try:
+            cand = upsert_candidate(db, workspace_id, u)
+            link_new = link_candidate_to_source(db, workspace_id, cand.id, source_id)
+        except DataError as e:
+            uid = u.tg_user_id
+            orig_name = type(e.orig).__name__ if e.orig else None
+            logger.error(
+                "collect persist failed collect_run_id=%s source_id=%s "
+                "tg_user_id_exceeds_int32=%s db_error=%s",
+                run.id,
+                source_id,
+                uid is not None and uid > _INT32_MAX,
+                orig_name,
+                exc_info=True,
+            )
+            raise
+        if link_new:
+            by_source_id[sk]["new_source_links"] += 1
+        has_id = u.tg_user_id is not None or normalize_username(u.username) is not None
+        if has_id:
+            if before_cand_id is None:
+                new_candidates += 1
+                by_source_id[sk]["new_candidates"] += 1
+            else:
+                updated_candidates += 1
+                by_source_id[sk]["updated_candidates"] += 1
+
+        if discovered_total % progress_every == 0:
+            logger.info(
+                "collect progress collect_run_id=%s source_id=%s discovered_total=%s new=%s updated=%s",
+                run.id,
+                source_id,
+                discovered_total,
+                new_candidates,
+                updated_candidates,
+            )
+
+        _flush_progress()
 
     for sid in run.source_ids:
         src = db.get(Source, sid)
@@ -205,55 +283,48 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             continue
 
         sk = str(sid)
-        by_source_id[sk] = {"discovered": 0, "new_candidates": 0, "updated_candidates": 0, "new_source_links": 0}
+        by_source_id[sk] = {
+            "discovered": 0,
+            "discovered_participants": 0,
+            "discovered_messages": 0,
+            "new_candidates": 0,
+            "updated_candidates": 0,
+            "new_source_links": 0,
+        }
 
-        for u in tg_client.iter_participants(src.identifier):
-            discovered_total += 1
-            by_source_id[sk]["discovered"] += 1
-            before_cand_id = _find_existing_candidate_id(db, workspace_id, u)
-            try:
-                cand = upsert_candidate(db, workspace_id, u)
-                link_new = link_candidate_to_source(db, workspace_id, cand.id, src.id)
-            except DataError as e:
-                uid = u.tg_user_id
-                orig_name = type(e.orig).__name__ if e.orig else None
-                logger.error(
-                    "collect persist failed collect_run_id=%s source_id=%s "
-                    "tg_user_id_exceeds_int32=%s db_error=%s",
-                    run.id,
-                    sid,
-                    uid is not None and uid > _INT32_MAX,
-                    orig_name,
-                    exc_info=True,
-                )
-                raise
-            if link_new:
-                by_source_id[sk]["new_source_links"] += 1
-            has_id = u.tg_user_id is not None or normalize_username(u.username) is not None
-            if has_id:
-                if before_cand_id is None:
-                    new_candidates += 1
-                    by_source_id[sk]["new_candidates"] += 1
-                else:
-                    updated_candidates += 1
-                    by_source_id[sk]["updated_candidates"] += 1
+        seen: set[object] = set()
+        participant_rows = 0
 
-            if discovered_total % progress_every == 0:
-                logger.info(
-                    "collect progress collect_run_id=%s source_id=%s discovered_total=%s new=%s updated=%s",
-                    run.id,
-                    sid,
-                    discovered_total,
-                    new_candidates,
-                    updated_candidates,
-                )
+        if collect_mode in {"participants", "both", "auto"}:
+            for u in tg_client.iter_participants(src.identifier):
+                participant_rows += 1
+                seen.add(_collect_user_dedupe_key(u))
+                _ingest_user(u, sk, sid, "participants")
 
-            _flush_progress()
+        run_messages = (
+            collect_mode in {"messages", "both"}
+            or (collect_mode == "auto" and participant_rows == 0)
+        )
+
+        if run_messages:
+            for u in tg_client.iter_users_from_messages(
+                src.identifier,
+                limit=message_scan_limit,
+                min_date=None,
+            ):
+                key = _collect_user_dedupe_key(u)
+                if key in seen:
+                    continue
+                seen.add(key)
+                _ingest_user(u, sk, sid, "messages")
 
     run.status = "succeeded"
     run.finished_at = utcnow()
     run.stats = {
         "discovered_total": discovered_total,
+        "discovered_from_participants": discovered_from_participants,
+        "discovered_from_messages": discovered_from_messages,
+        "collect_mode": collect_mode,
         "new_candidates": new_candidates,
         "updated_candidates": updated_candidates,
         "skipped": 0,

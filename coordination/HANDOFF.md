@@ -645,3 +645,27 @@ cd ui && npm run lint && npm run build
 - Default API deploy (noop Telegram) does not fill meta until **worker** runs refresh or queue handles job; `participants_count` from Telegram still may exceed iterable participant count.
 
 - Pushed: `git push origin master:test` (main feature `f043481`, plus handoff follow-ups on the same day).
+
+
+## 2026-04-02 (feat: collect from message history + COLLECT_MODE)
+
+### What changed
+
+- **`TelegramClient.iter_users_from_messages`:** optional scan of chat history for **user** senders (Telethon `iter_messages`; skips bots/service messages). Noop/API default yields nothing.
+- **`process_collect_run`:** worker env **`COLLECT_MODE`** = `participants` | `messages` | `both` | `auto`; **`COLLECT_MESSAGE_SCAN_LIMIT`** (default 5000). Stats: `discovered_from_participants`, `discovered_from_messages`, `collect_mode`; `by_source_id` adds `discovered_participants` / `discovered_messages`; `discovered` = sum.
+- **Tests:** `tests/test_collect_from_messages.py`.
+- **UI:** Collect run list + run detail show mode and p/m split.
+- **Docs:** `docs/DESIGN.md`, `docs/REPORT.md`, `docs/RAILWAY.md`.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Message collection only sees **authors in the scanned window**; broadcast channels rarely expose subscribers this way. Heavy scans increase FloodWait risk.
+
+- Pushed: `git push origin master:test`.
