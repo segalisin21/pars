@@ -45,6 +45,8 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
   - `ADMIN_TOKEN` = (generate strong token)
   - `CORS_ALLOWED_ORIGINS` = (your `ui` public URL, e.g. `https://<ui>.up.railway.app`)
 
+> Note: on startup the API will automatically create DB tables (v1) if they don't exist yet.
+
 ### Service: `worker`
 
 - **Root directory**: repo root
@@ -62,6 +64,8 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `TG_API_ID` = your Telegram API ID
   - `TG_API_HASH` = your Telegram API HASH
   - `TG_SESSION_STRING` = your Telegram session string (worker-only secret)
+
+> Note: on startup the worker will automatically create DB tables (v1) if they don't exist yet.
 
 > Important: `worker` must not be public.
 

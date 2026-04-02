@@ -5,6 +5,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.db import Base
 from app.models import CollectRun, InviteRun
 from app.services import run_collect, run_invite
 from app.telegram_client import TelegramClient
@@ -15,6 +16,7 @@ def _get_session_factory() -> sessionmaker[Session]:
     if not db_url:
         raise RuntimeError("DATABASE_URL is required for worker jobs")
     engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)
 
 

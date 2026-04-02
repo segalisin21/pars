@@ -5,7 +5,7 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.db import Base, create_session_factory, create_sqlite_engine
@@ -70,7 +70,11 @@ def create_app(
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": "http_error", "message": str(exc.detail), "details": {}}})
 
     if session_factory is None:
-        engine = create_sqlite_engine("sqlite:///./app.db")
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            engine = create_engine(db_url, future=True)
+        else:
+            engine = create_sqlite_engine("sqlite:///./app.db")
         Base.metadata.create_all(engine)
         session_factory = create_session_factory(engine)
 
