@@ -527,3 +527,23 @@ cd ui && npm run lint && npm run build
 
 - Committed `feat(ui): operator panel redesign and office-parallel docs` on `master`.
 - Pushed: `git push origin master:test` → remote branch `test` updated (`352ae9d..550852a`).
+
+
+## 2026-04-02 (docs: Railway build speed + Node pin for ui)
+
+### What changed
+
+- `docs/RAILWAY.md`: section **Slow builds on Railway** (wrong service root, duplicate `npm ci`, multi-service redeploys, cache).
+- `ui/package.json`: `engines.node >= 20`.
+- `ui/.nvmrc`: `20`.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Railway latency still depends on platform queue/cache; pinning Node reduces toolchain mismatches, not total build time.

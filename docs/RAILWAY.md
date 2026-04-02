@@ -92,6 +92,23 @@ npm run preview -- --host 0.0.0.0 --port $PORT
   - `VITE_API_BASE_URL` = your `api` public URL
   - `VITE_ADMIN_TOKEN` = same token as `ADMIN_TOKEN` (optional, but required for write actions)
 
+## Slow builds on Railway
+
+Railway runs a **fresh build** for each service (`api`, `worker`, `ui`). The first deploy after a change is usually the slowest; later deploys can reuse layers/cache, but not always.
+
+**Typical causes of “very long” builds**
+
+1. **Wrong root directory** — if `ui` is built from the **repo root**, Nixpacks may pick the **Python** builder, install `requirements.txt`, then fail or fall back to Node. That wastes minutes. Fix: set **Root directory** to `ui` for the UI service (see error below).
+2. **Duplicate install steps** — Railpack/Nixpacks already runs `npm ci` (or equivalent). Your **Build command** should be only `npm run build`, not `npm ci && npm run build`.
+3. **Many services redeploying** — changing the default branch can trigger **api + worker + ui +** health checks; each is a separate build queue.
+4. **Cold cache** — dependency or base-image cache miss after Dockerfile/buildpack changes.
+
+**What we recommend**
+
+- Pin Node for the UI via `ui/package.json` `engines` and `ui/.nvmrc` (helps consistent, cache-friendly installs).
+- Keep `ui` **Build command**: `npm run build`; **Start**: `npm run preview -- --host 0.0.0.0 --port $PORT` (as above).
+- For `api` / `worker`, keep **Root directory** at repo root; avoid unnecessary file churn in `requirements.txt` to improve pip cache hits.
+
 ## Common deploy errors
 
 ### UI builds as Python and fails with `npm: not found`
