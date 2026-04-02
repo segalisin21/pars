@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from dataclasses import dataclass
+from typing import Iterable
 
 from app.telegram_client import FloodWaitError, TelegramClient, TgUser
 
@@ -52,49 +52,9 @@ class TelethonTelegramClient(TelegramClient):
         session_string = _get_session_string()
         return cls(TelethonConfig(api_id=api_id, api_hash=api_hash, session_string=session_string))
 
-    def get_participants(self, source_identifier: str) -> list[TgUser]:
-        return asyncio.run(self._get_participants_async(source_identifier))
-
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
-        asyncio.run(self._invite_to_target_async(target_identifier, tg_user_id))
-
-    async def _get_participants_async(self, source_identifier: str) -> list[TgUser]:
         try:
-            from telethon import TelegramClient as _TelethonClient  # type: ignore
-            from telethon.sessions import StringSession  # type: ignore
-            from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError("Telethon is not installed") from e
-
-        ident = _normalize_identifier(source_identifier)
-        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
-        try:
-            await client.connect()
-            entity = await client.get_entity(ident)
-            out: list[TgUser] = []
-            async for u in client.iter_participants(entity):
-                first = getattr(u, "first_name", None) or ""
-                last = getattr(u, "last_name", None) or ""
-                name = (first + " " + last).strip() or None
-                out.append(
-                    TgUser(
-                        tg_user_id=getattr(u, "id", None),
-                        username=getattr(u, "username", None),
-                        display_name=name,
-                    )
-                )
-            return out
-        except _TelethonFloodWait as e:  # pragma: no cover (network)
-            raise FloodWaitError(int(getattr(e, "seconds", 0)))
-        finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-
-    async def _invite_to_target_async(self, target_identifier: str, tg_user_id: int) -> None:
-        try:
-            from telethon import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
             from telethon.sessions import StringSession  # type: ignore
             from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
             from telethon.tl.functions.channels import InviteToChannelRequest  # type: ignore
@@ -104,14 +64,44 @@ class TelethonTelegramClient(TelegramClient):
         ident = _normalize_identifier(target_identifier)
         client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
         try:
-            await client.connect()
-            entity = await client.get_entity(ident)
-            await client(InviteToChannelRequest(channel=entity, users=[tg_user_id]))
+            client.connect()
+            entity = client.get_entity(ident)
+            client(InviteToChannelRequest(channel=entity, users=[tg_user_id]))
         except _TelethonFloodWait as e:  # pragma: no cover (network)
             raise FloodWaitError(int(getattr(e, "seconds", 0)))
         finally:
             try:
-                await client.disconnect()
+                client.disconnect()
+            except Exception:
+                pass
+
+    def iter_participants(self, source_identifier: str) -> Iterable[TgUser]:
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+            from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Telethon is not installed") from e
+
+        ident = _normalize_identifier(source_identifier)
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            entity = client.get_entity(ident)
+            for u in client.iter_participants(entity):
+                first = getattr(u, "first_name", None) or ""
+                last = getattr(u, "last_name", None) or ""
+                name = (first + " " + last).strip() or None
+                yield TgUser(
+                    tg_user_id=getattr(u, "id", None),
+                    username=getattr(u, "username", None),
+                    display_name=name,
+                )
+        except _TelethonFloodWait as e:  # pragma: no cover (network)
+            raise FloodWaitError(int(getattr(e, "seconds", 0)))
+        finally:
+            try:
+                client.disconnect()
             except Exception:
                 pass
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -17,8 +18,11 @@ class FloodWaitError(Exception):
 
 
 class TelegramClient:
-    def get_participants(self, source_identifier: str) -> list[TgUser]:
+    def iter_participants(self, source_identifier: str) -> Iterable[TgUser]:
         raise NotImplementedError
+
+    def get_participants(self, source_identifier: str) -> list[TgUser]:
+        return list(self.iter_participants(source_identifier))
 
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         raise NotImplementedError

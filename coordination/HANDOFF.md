@@ -441,3 +441,27 @@ pytest tests/ -v --tb=short
 ```bash
 pytest tests/ -v --tb=short
 ```
+
+## 2026-04-02 (chore: worker/collect diagnostic logging)
+
+### What changed
+
+- `app/worker_jobs.py`: INFO at job start (run_id, source_ids or target_id, `tg_client=telethon|noop`); `logger.exception` on failure with the same context (no secrets).
+- `app/services.py`: on `DataError` during collect persist, ERROR log with `collect_run_id`, `source_id`, `tg_user_id_exceeds_int32` (boolean hint for Postgres INTEGER vs BIGINT), and DB driver error class — helps confirm `integer out of range` without logging raw `tg_user_id`.
+- `tests/test_collect_large_tg_user_id.py`: regression test that `run_collect` persists Telegram user ids above 32-bit signed max (SQLite in-memory).
+
+### Key files
+
+- `app/worker_jobs.py`
+- `app/services.py`
+- `tests/test_collect_large_tg_user_id.py`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Production must still run `ALTER TABLE ... BIGINT` on existing Postgres if columns were created as INTEGER; see `docs/RAILWAY.md`.

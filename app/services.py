@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime, timedelta
 from time import monotonic
 
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -19,6 +21,26 @@ from app.models import (
     utcnow,
 )
 from app.telegram_client import FloodWaitError, TelegramClient, TgUser
+
+logger = logging.getLogger(__name__)
+
+# PostgreSQL INTEGER max; BIGINT is required for typical Telegram user ids.
+_INT32_MAX = 2_147_483_647
+
+
+def _int_env(name: str, default: int, *, min_value: int = 1, max_value: int | None = None) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        v = default
+    else:
+        try:
+            v = int(raw)
+        except ValueError:
+            v = default
+    v = max(min_value, v)
+    if max_value is not None:
+        v = min(max_value, v)
+    return v
 
 
 def normalize_username(username: str | None) -> str | None:
@@ -85,36 +107,82 @@ def link_candidate_to_source(db: Session, candidate_id: int, source_id: int) -> 
         db.add(CandidateSourceLink(candidate_id=candidate_id, source_id=source_id))
 
 
-def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int]) -> CollectRun:
-    run = CollectRun(status="running", source_ids=source_ids, started_at=utcnow(), stats={})
-    db.add(run)
+def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun) -> CollectRun:
+    batch_size = _int_env("COLLECT_BATCH_SIZE", 300, min_value=1, max_value=5000)
+    progress_every = _int_env("COLLECT_PROGRESS_EVERY", 500, min_value=1, max_value=50_000)
+
+    run.status = "running"
+    run.started_at = utcnow()
+    run.finished_at = None
+    if not isinstance(run.stats, dict):
+        run.stats = {}
     db.flush()
 
     discovered_total = 0
     new_candidates = 0
     updated_candidates = 0
+    last_commit_at = 0
 
-    for sid in source_ids:
+    def _flush_progress(*, force: bool = False) -> None:
+        nonlocal last_commit_at
+        if not force and (discovered_total - last_commit_at) < batch_size:
+            return
+        run.stats = {
+            "discovered_total": discovered_total,
+            "new_candidates": new_candidates,
+            "updated_candidates": updated_candidates,
+            "skipped": 0,
+        }
+        db.flush()
+        db.commit()
+        last_commit_at = discovered_total
+
+    for sid in run.source_ids:
         src = db.get(Source, sid)
         if src is None:
             raise KeyError(f"source_not_found:{sid}")
         if not src.enabled:
             continue
 
-        users = tg_client.get_participants(src.identifier)
-        for u in users:
+        for u in tg_client.iter_participants(src.identifier):
             discovered_total += 1
             before_id = None
             if u.tg_user_id is not None:
                 existing = db.scalar(select(CandidateUser.id).where(CandidateUser.tg_user_id == u.tg_user_id))
                 before_id = existing
-            cand = upsert_candidate(db, u)
-            link_candidate_to_source(db, cand.id, src.id)
+            try:
+                cand = upsert_candidate(db, u)
+                link_candidate_to_source(db, cand.id, src.id)
+            except DataError as e:
+                uid = u.tg_user_id
+                orig_name = type(e.orig).__name__ if e.orig else None
+                logger.error(
+                    "collect persist failed collect_run_id=%s source_id=%s "
+                    "tg_user_id_exceeds_int32=%s db_error=%s",
+                    run.id,
+                    sid,
+                    uid is not None and uid > _INT32_MAX,
+                    orig_name,
+                    exc_info=True,
+                )
+                raise
             if before_id is None and (u.tg_user_id is not None or normalize_username(u.username) is not None):
                 if cand.first_seen_at == cand.last_seen_at:
                     new_candidates += 1
                 else:
                     updated_candidates += 1
+
+            if discovered_total % progress_every == 0:
+                logger.info(
+                    "collect progress collect_run_id=%s source_id=%s discovered_total=%s new=%s updated=%s",
+                    run.id,
+                    sid,
+                    discovered_total,
+                    new_candidates,
+                    updated_candidates,
+                )
+
+            _flush_progress()
 
     run.status = "succeeded"
     run.finished_at = utcnow()
@@ -124,7 +192,15 @@ def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int]) -
         "updated_candidates": updated_candidates,
         "skipped": 0,
     }
+    db.flush()
     return run
+
+
+def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int]) -> CollectRun:
+    run = CollectRun(status="running", source_ids=source_ids, started_at=utcnow(), stats={})
+    db.add(run)
+    db.flush()
+    return process_collect_run(db, tg_client, run)
 
 
 def is_suppressed(db: Session, candidate: CandidateUser, now: datetime) -> bool:
@@ -142,16 +218,21 @@ def is_suppressed(db: Session, candidate: CandidateUser, now: datetime) -> bool:
     return False
 
 
-def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: dict) -> InviteRun:
+def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -> InviteRun:
+    run.status = "running"
+    run.started_at = utcnow()
+    run.finished_at = None
+    if not isinstance(run.stats, dict):
+        run.stats = {}
+    db.flush()
+
+    target_id = run.target_id
+    policy = run.policy
     target = db.get(InviteTarget, target_id)
     if target is None:
         raise KeyError(f"target_not_found:{target_id}")
     if not target.enabled:
         raise ValueError("target_disabled")
-
-    run = InviteRun(status="running", target_id=target_id, policy=policy, started_at=utcnow(), stats={})
-    db.add(run)
-    db.flush()
 
     now = utcnow()
     cooldown_minutes = int(policy.get("cooldown_minutes", 1440))
@@ -298,4 +379,11 @@ def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: d
         "failed_by_code": failed_by_code,
     }
     return run
+
+
+def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: dict) -> InviteRun:
+    run = InviteRun(status="running", target_id=target_id, policy=policy, started_at=utcnow(), stats={})
+    db.add(run)
+    db.flush()
+    return process_invite_run(db, tg_client, run)
 

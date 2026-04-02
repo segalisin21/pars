@@ -58,6 +58,17 @@ from app.telegram_auth_web import request_code as tg_request_code, verify_code a
 from app.worker_jobs import execute_collect_run, execute_invite_run
 
 
+def _rq_timeout_seconds(env_var: str, default_seconds: int) -> int:
+    raw = os.getenv(env_var)
+    if not raw:
+        return default_seconds
+    try:
+        v = int(raw)
+    except ValueError:
+        return default_seconds
+    return max(1, v)
+
+
 def error(code: str, message: str, details: dict | None = None) -> HTTPException:
     payload = {"error": {"code": code, "message": message, "details": details or {}}}
     return HTTPException(status_code=400, detail=payload)
@@ -100,6 +111,9 @@ def create_app(
 
     if tg_client is None:
         class _NoopTelegramClient(TelegramClient):
+            def iter_participants(self, source_identifier: str):
+                return iter(())
+
             def get_participants(self, source_identifier: str):
                 return []
 
@@ -447,7 +461,11 @@ def create_app(
             db.commit()
             db.refresh(run)
             q = get_rq_queue()
-            q.enqueue(execute_collect_run, run_id=run.id)
+            q.enqueue(
+                execute_collect_run,
+                run_id=run.id,
+                job_timeout=_rq_timeout_seconds("RQ_COLLECT_TIMEOUT_SECONDS", 1800),
+            )
             db.add(AuditEvent(action="collect.start", entity_type="collect_run", entity_id=run.id, meta={"source_ids": payload.source_ids}))
             db.commit()
             return CollectRunOut(
@@ -539,7 +557,11 @@ def create_app(
             db.commit()
             db.refresh(run)
             q = get_rq_queue()
-            q.enqueue(execute_invite_run, run_id=run.id)
+            q.enqueue(
+                execute_invite_run,
+                run_id=run.id,
+                job_timeout=_rq_timeout_seconds("RQ_INVITE_TIMEOUT_SECONDS", 1800),
+            )
             db.add(AuditEvent(action="invite.start", entity_type="invite_run", entity_id=run.id, meta={"target_id": payload.target_id}))
             db.commit()
             return InviteRunOut(

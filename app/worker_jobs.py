@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 
 from sqlalchemy import create_engine
@@ -7,9 +8,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import Base
 from app.models import CollectRun, InviteRun
-from app.services import run_collect, run_invite
+from app.services import process_collect_run, process_invite_run
 from app.telegram_client import TelegramClient
 from app.telethon_client import TelethonTelegramClient
+
+logger = logging.getLogger(__name__)
+
+
+def _tg_client_mode(tg: TelegramClient) -> str:
+    return "telethon" if isinstance(tg, TelethonTelegramClient) else "noop"
 
 
 def _get_session_factory() -> sessionmaker[Session]:
@@ -29,6 +36,9 @@ def _get_tg_client() -> TelegramClient:
         return TelethonTelegramClient.from_env()
     except Exception:
         class _NoopTelegramClient(TelegramClient):
+            def iter_participants(self, source_identifier: str):
+                return iter(())
+
             def get_participants(self, source_identifier: str):
                 return []
 
@@ -51,10 +61,22 @@ def execute_collect_run(*, run_id: int) -> None:
         run.status = "running"
         db.flush()
 
+        logger.info(
+            "collect_run start run_id=%s source_ids=%s tg_client=%s",
+            run_id,
+            run.source_ids,
+            _tg_client_mode(tg),
+        )
         try:
-            run_collect(db, tg, run.source_ids)
+            process_collect_run(db, tg, run)
         except Exception:
             run.status = "failed"
+            logger.exception(
+                "collect_run failed run_id=%s source_ids=%s tg_client=%s",
+                run_id,
+                run.source_ids,
+                _tg_client_mode(tg),
+            )
             raise
         finally:
             db.commit()
@@ -75,10 +97,22 @@ def execute_invite_run(*, run_id: int) -> None:
         run.status = "running"
         db.flush()
 
+        logger.info(
+            "invite_run start run_id=%s target_id=%s tg_client=%s",
+            run_id,
+            run.target_id,
+            _tg_client_mode(tg),
+        )
         try:
-            run_invite(db, tg, run.target_id, run.policy)
+            process_invite_run(db, tg, run)
         except Exception:
             run.status = "failed"
+            logger.exception(
+                "invite_run failed run_id=%s target_id=%s tg_client=%s",
+                run_id,
+                run.target_id,
+                _tg_client_mode(tg),
+            )
             raise
         finally:
             db.commit()

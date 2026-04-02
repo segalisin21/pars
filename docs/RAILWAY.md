@@ -64,6 +64,10 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `TG_API_ID` = your Telegram API ID
   - `TG_API_HASH` = your Telegram API HASH
   - `TG_SESSION_STRING` = your Telegram session string (worker-only secret)
+  - `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (recommended for large groups; default may be too small)
+  - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
+  - `COLLECT_BATCH_SIZE` = `300` (how often we commit progress during collect)
+  - `COLLECT_PROGRESS_EVERY` = `500` (how often we log progress during collect)
 
 > Note: on startup the worker will automatically create DB tables (v1) if they don't exist yet.
 
@@ -115,6 +119,13 @@ ALTER TABLE suppression_list ALTER COLUMN tg_user_id TYPE BIGINT;
 ```
 
 Then redeploy `api` and `worker`.
+
+### Worker: collect job times out (`JobTimeoutException: ... 180 seconds`)
+
+If collect runs against large groups/channels, fetching participants can take minutes. Increase RQ job timeouts on `worker`:
+
+- `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (or `3600`)
+- `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
 
 ## 4) Verify
 

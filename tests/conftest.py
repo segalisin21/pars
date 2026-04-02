@@ -17,8 +17,11 @@ class FakeTelegramClient(TelegramClient):
         self.participants_by_source: dict[str, list[TgUser]] = {}
         self.flood_on_user_ids: set[int] = set()
 
+    def iter_participants(self, source_identifier: str):
+        yield from list(self.participants_by_source.get(source_identifier, []))
+
     def get_participants(self, source_identifier: str) -> list[TgUser]:
-        return list(self.participants_by_source.get(source_identifier, []))
+        return list(self.iter_participants(source_identifier))
 
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         self.invite_calls.append((target_identifier, tg_user_id))
