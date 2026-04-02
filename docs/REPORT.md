@@ -62,6 +62,7 @@ All non-2xx responses use:
   "identifier": "@somegroup",
   "enabled": true,
   "notes": "optional",
+  "collect_mode": "participants",
   "telegram_title": "Public title or null",
   "telegram_participants_count": 54000,
   "telegram_meta_updated_at": "2026-04-02T12:00:00Z"
@@ -69,6 +70,8 @@ All non-2xx responses use:
 ```
 
 `type` values: `group` | `chat` | `channel`
+
+`collect_mode` (per source): `participants` | `messages` | `both` | `auto` — where the **worker** pulls contacts for this source during a collect run (member list vs recent message senders vs both vs auto-fallback). Default `participants`. If the stored value is invalid, the worker falls back to env `COLLECT_MODE`.
 
 `telegram_*` fields are filled when **Telegram metadata** is refreshed (see `POST /sources/{id}/refresh_telegram_meta`). `telegram_participants_count` comes from Telegram’s channel/group full info; it **may exceed** the number of users the same session can enumerate into candidates.
 
@@ -111,6 +114,7 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
     "skipped": 0,
     "by_source_id": {
       "1": {
+        "collect_mode": "both",
         "discovered": 120,
         "discovered_participants": 100,
         "discovered_messages": 20,
@@ -125,9 +129,9 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
 
 `status` values: `queued` | `running` | `succeeded` | `failed` | `cancelled`
 
-`by_source_id` keys are stringified internal `source_id` values. `new_source_links` counts new rows in `candidate_source_links` for that source during the run.
+`stats.collect_mode` is a single label when all sources in the run used the same mode; otherwise `mixed`. Each `by_source_id` entry includes `collect_mode` for that source. `new_source_links` counts new rows in `candidate_source_links` for that source during the run.
 
-**Collect worker environment (not HTTP):** `COLLECT_MODE` = `participants` | `messages` | `both` | `auto` (default `participants`). `COLLECT_MESSAGE_SCAN_LIMIT` = max messages to scan per source when message collection runs (default `5000`, clamped server-side). These apply to the **worker** process that executes `process_collect_run`; the API only starts runs.
+**Collect worker environment (not HTTP):** `COLLECT_MESSAGE_SCAN_LIMIT` = max messages to scan per source when message collection runs (default `5000`, clamped server-side). Env `COLLECT_MODE` is a **fallback** when a source has no valid `collect_mode` in the database (legacy); normally each source’s `collect_mode` field controls behavior. These apply to the **worker** that executes `process_collect_run`.
 
 ### InviteRun
 
@@ -186,9 +190,12 @@ Request:
   "type": "group",
   "identifier": "@somegroup",
   "enabled": true,
-  "notes": "optional"
+  "notes": "optional",
+  "collect_mode": "participants"
 }
 ```
+
+`collect_mode` optional on create (default `participants`).
 
 Response `201`: Source
 
@@ -205,7 +212,7 @@ Response `200`:
 ```
 
 #### `PATCH /sources/{id}`
-Update source (v1: enable/disable and notes).
+Update source (v1: enable/disable, notes, `collect_mode`).
 
 Requires auth.
 

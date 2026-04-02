@@ -669,3 +669,28 @@ cd ui && npm run lint && npm run build
 - Message collection only sees **authors in the scanned window**; broadcast channels rarely expose subscribers this way. Heavy scans increase FloodWait risk.
 
 - Pushed: `git push origin master:test`.
+
+
+## 2026-04-02 (feat: per-source collect_mode in UI + API)
+
+### What changed
+
+- **Model `Source`:** `collect_mode` (`participants` | `messages` | `both` | `auto`), default `participants`.
+- **API:** `SourceCreate` / `SourcePatch` / `SourceOut` include `collect_mode`; `process_collect_run` uses `effective_collect_mode_for_source` (per row, env `COLLECT_MODE` fallback if invalid/missing). Run stats: `collect_mode` = single mode or `mixed`; each `by_source_id` entry has `collect_mode`.
+- **Postgres:** `scripts/migrate_source_collect_mode_pg.sql`.
+- **UI:** Sources — выбор режима при создании и в таблице; Collect — подпись режима на чипах.
+- **Docs:** `docs/DESIGN.md`, `docs/REPORT.md`, `docs/RAILWAY.md`.
+- **Tests:** `test_api_basic`, `test_collect_from_messages` (patch + mixed + env override).
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Existing SQLite file DBs need `ALTER TABLE sources ADD COLUMN collect_mode ...` or recreate; Postgres needs the new migration script once.
+
+- Pushed: `git push origin master:test`.

@@ -37,6 +37,9 @@ class Source(Base):
     telegram_participants_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     telegram_meta_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Where to pull contacts: participants list, message senders, both, or auto (messages if participant list empty).
+    collect_mode: Mapped[str] = mapped_column(String(32), default="participants", nullable=False)
+
     workspace: Mapped[Workspace] = relationship()
 
     __table_args__ = (UniqueConstraint("workspace_id", "type", "identifier", name="uq_source_workspace_type_identifier"),)

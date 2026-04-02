@@ -6,12 +6,15 @@ export type ApiError = {
   }
 }
 
+export type CollectMode = 'participants' | 'messages' | 'both' | 'auto'
+
 export type Source = {
   id: number
   type: 'group' | 'chat' | 'channel' | string
   identifier: string
   enabled: boolean
   notes: string | null
+  collect_mode: CollectMode
   telegram_title: string | null
   telegram_participants_count: number | null
   telegram_meta_updated_at: string | null
@@ -215,12 +218,18 @@ export const api = {
     }
     return fetchSourcesList()
   },
-  createSource: async (payload: { type: string; identifier: string; enabled?: boolean; notes?: string | null }) => {
+  createSource: async (payload: {
+    type: string
+    identifier: string
+    enabled?: boolean
+    notes?: string | null
+    collect_mode?: CollectMode
+  }) => {
     const r = await request<Source>('/sources', { method: 'POST', body: JSON.stringify(payload) })
     invalidateSourcesListCache()
     return r
   },
-  patchSource: async (id: number, payload: { enabled?: boolean; notes?: string | null }) => {
+  patchSource: async (id: number, payload: { enabled?: boolean; notes?: string | null; collect_mode?: CollectMode }) => {
     const r = await request<Source>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
     invalidateSourcesListCache()
     return r

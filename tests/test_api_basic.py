@@ -14,12 +14,28 @@ def test_sources_create_and_list(client):
     assert body["id"] >= 1
     assert body["type"] == "group"
     assert body["identifier"] == "SomeGroup"
+    assert body["collect_mode"] == "participants"
 
     r2 = client.get("/sources")
     assert r2.status_code == 200
     items = r2.json()["items"]
     assert len(items) == 1
     assert items[0]["identifier"] == "SomeGroup"
+    assert items[0]["collect_mode"] == "participants"
+
+
+def test_sources_create_with_collect_mode_and_patch(client):
+    r = client.post(
+        "/sources",
+        json={"type": "group", "identifier": "@modegrp", "enabled": True, "collect_mode": "both"},
+    )
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert r.json()["collect_mode"] == "both"
+
+    r2 = client.patch(f"/sources/{sid}", json={"collect_mode": "messages"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["collect_mode"] == "messages"
 
 
 def test_targets_create_and_list(client):

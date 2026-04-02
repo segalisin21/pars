@@ -155,12 +155,16 @@ def create_app(
     get_tg = make_get_tg(tg_client)
 
     def source_row_out(s: Source) -> SourceOut:
+        cm = getattr(s, "collect_mode", None) or "participants"
+        if cm not in {"participants", "messages", "both", "auto"}:
+            cm = "participants"
         return SourceOut(
             id=s.id,
             type=s.type,
             identifier=s.identifier,
             enabled=s.enabled,
             notes=s.notes,
+            collect_mode=cm,
             telegram_title=s.telegram_title,
             telegram_participants_count=s.telegram_participants_count,
             telegram_meta_updated_at=s.telegram_meta_updated_at,
@@ -195,6 +199,7 @@ def create_app(
             identifier=payload.identifier,
             enabled=payload.enabled,
             notes=payload.notes,
+            collect_mode=payload.collect_mode,
         )
         db.add(src)
         db.commit()
@@ -234,6 +239,8 @@ def create_app(
             src.enabled = payload.enabled
         if payload.notes is not None:
             src.notes = payload.notes
+        if payload.collect_mode is not None:
+            src.collect_mode = payload.collect_mode
         db.commit()
         db.refresh(src)
         db.add(
@@ -242,7 +249,7 @@ def create_app(
                 action="source.patch",
                 entity_type="source",
                 entity_id=src.id,
-                meta={"enabled": src.enabled},
+                meta={"enabled": src.enabled, "collect_mode": src.collect_mode},
             )
         )
         db.commit()

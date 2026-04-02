@@ -20,11 +20,15 @@ class ErrorEnvelope(BaseModel):
     error: dict[str, Any]
 
 
+CollectMode = Literal["participants", "messages", "both", "auto"]
+
+
 class SourceCreate(BaseModel):
     type: Literal["group", "chat", "channel"]
     identifier: str = Field(min_length=1, max_length=256)
     enabled: bool = True
     notes: str | None = Field(default=None, max_length=512)
+    collect_mode: CollectMode = "participants"
 
     @field_validator("identifier")
     @classmethod
@@ -41,6 +45,7 @@ class SourceOut(BaseModel):
     identifier: str
     enabled: bool
     notes: str | None
+    collect_mode: CollectMode
     telegram_title: str | None = None
     telegram_participants_count: int | None = None
     telegram_meta_updated_at: datetime | None = None
@@ -57,6 +62,7 @@ class SourcesList(BaseModel):
 class SourcePatch(BaseModel):
     enabled: bool | None = None
     notes: str | None = Field(default=None, max_length=512)
+    collect_mode: CollectMode | None = None
 
 
 class TargetCreate(BaseModel):

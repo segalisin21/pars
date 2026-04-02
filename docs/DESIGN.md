@@ -90,11 +90,11 @@ Statuses (suggested)
 ### Flow B: Collect candidates
 
 1. Admin starts a **CollectRun** with selected `source_ids`.
-2. Worker resolves each source and queries the Telegram client according to **`COLLECT_MODE`** (worker env):
-   - **`participants`** (default): `iter_participants` only — same as historical v1 behavior.
+2. For each source, the worker uses that source’s **`collect_mode`** field (set in the operator UI or API; default `participants`). If the stored value is missing/invalid, env **`COLLECT_MODE`** is used as fallback.
+   - **`participants`**: `iter_participants` only.
    - **`messages`**: scan recent message history and upsert **senders** (users who posted). Useful when the member list is hidden or empty for the session but chat history is readable.
-   - **`both`**: participants first, then message senders **deduped** by `tg_user_id` / normalized username so the same person is not double-counted across the two passes.
-   - **`auto`**: run participants first; if that yields **zero** participant rows for a source, run the message scan for that source (fallback for hidden lists).
+   - **`both`**: participants first, then message senders **deduped** by `tg_user_id` / normalized username.
+   - **`auto`**: run participants first; if that yields **zero** participant rows for that source, run the message scan (fallback for hidden lists).
 3. Message history is bounded by **`COLLECT_MESSAGE_SCAN_LIMIT`** (max messages to walk, newest-first); deep history means more API calls and FloodWait risk.
 4. Service validates and normalizes user records:
    - store `tg_user_id` if present

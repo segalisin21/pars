@@ -12,6 +12,21 @@ function runIsActive(r: CollectRun): boolean {
   return r.status === 'queued' || r.status === 'running'
 }
 
+function collectModeShort(m: Source['collect_mode']): string {
+  switch (m) {
+    case 'participants':
+      return 'участники'
+    case 'messages':
+      return 'чат'
+    case 'both':
+      return 'уч+чат'
+    case 'auto':
+      return 'авто'
+    default:
+      return String(m)
+  }
+}
+
 export function CollectPage() {
   const { runId: runIdParam } = useParams()
   const runId = runIdParam ? Number(runIdParam) : null
@@ -186,6 +201,7 @@ export function CollectPage() {
                   disabled={busy}
                   title={
                     [
+                      `Сбор: ${collectModeShort(s.collect_mode)}`,
                       s.telegram_title,
                       s.telegram_participants_count != null
                         ? `~${s.telegram_participants_count.toLocaleString()} подписчиков (из API; сбор может дать меньше)`
@@ -198,6 +214,7 @@ export function CollectPage() {
                   <span>
                     #{s.id} @{s.identifier}
                   </span>
+                  <span className="chipSub">Сбор: {collectModeShort(s.collect_mode)}</span>
                   {s.telegram_title ? <span className="chipSub">{s.telegram_title}</span> : null}
                   {s.telegram_participants_count != null ? (
                     <span className="chipSub">~{s.telegram_participants_count.toLocaleString()} в канале</span>

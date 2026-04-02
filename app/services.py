@@ -4,6 +4,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from time import monotonic
+from typing import Any
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import DataError, IntegrityError
@@ -48,6 +49,31 @@ def _collect_mode() -> str:
     if v in {"participants", "messages", "both", "auto"}:
         return v
     return "participants"
+
+
+def _normalize_stored_collect_mode(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    v = raw.strip().lower()
+    if v in {"participants", "messages", "both", "auto"}:
+        return v
+    return None
+
+
+def effective_collect_mode_for_source(src: Source) -> str:
+    """Per-source `collect_mode` column, or `COLLECT_MODE` env if value missing/invalid."""
+    explicit = _normalize_stored_collect_mode(getattr(src, "collect_mode", None))
+    if explicit is not None:
+        return explicit
+    return _collect_mode()
+
+
+def _aggregate_collect_mode_label(by: dict[str, dict[str, Any]]) -> str:
+    modes = [row.get("collect_mode") for row in by.values() if isinstance(row.get("collect_mode"), str)]
+    if not modes:
+        return "participants"
+    uniq = sorted(set(modes))
+    return uniq[0] if len(uniq) == 1 else "mixed"
 
 
 def _collect_user_dedupe_key(u: TgUser) -> object:
@@ -182,7 +208,6 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     workspace_id = run.workspace_id
     batch_size = _int_env("COLLECT_BATCH_SIZE", 300, min_value=1, max_value=5000)
     progress_every = _int_env("COLLECT_PROGRESS_EVERY", 500, min_value=1, max_value=50_000)
-    collect_mode = _collect_mode()
     message_scan_limit = _int_env("COLLECT_MESSAGE_SCAN_LIMIT", 5000, min_value=1, max_value=500_000)
 
     run.status = "running"
@@ -198,7 +223,7 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
     new_candidates = 0
     updated_candidates = 0
     last_commit_at = 0
-    by_source_id: dict[str, dict[str, int]] = {}
+    by_source_id: dict[str, dict[str, Any]] = {}
 
     def _flush_progress(*, force: bool = False) -> None:
         nonlocal last_commit_at
@@ -208,7 +233,7 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             "discovered_total": discovered_total,
             "discovered_from_participants": discovered_from_participants,
             "discovered_from_messages": discovered_from_messages,
-            "collect_mode": collect_mode,
+            "collect_mode": _aggregate_collect_mode_label(by_source_id),
             "new_candidates": new_candidates,
             "updated_candidates": updated_candidates,
             "skipped": 0,
@@ -283,7 +308,9 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             continue
 
         sk = str(sid)
+        collect_mode = effective_collect_mode_for_source(src)
         by_source_id[sk] = {
+            "collect_mode": collect_mode,
             "discovered": 0,
             "discovered_participants": 0,
             "discovered_messages": 0,
@@ -324,7 +351,7 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
         "discovered_total": discovered_total,
         "discovered_from_participants": discovered_from_participants,
         "discovered_from_messages": discovered_from_messages,
-        "collect_mode": collect_mode,
+        "collect_mode": _aggregate_collect_mode_label(by_source_id),
         "new_candidates": new_candidates,
         "updated_candidates": updated_candidates,
         "skipped": 0,

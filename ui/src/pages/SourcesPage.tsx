@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import type { Source } from '../lib/api'
+import type { CollectMode, Source } from '../lib/api'
+
+const COLLECT_MODE_OPTIONS: { value: CollectMode; label: string }[] = [
+  { value: 'participants', label: 'Участники' },
+  { value: 'messages', label: 'Чат (авторы)' },
+  { value: 'both', label: 'Оба' },
+  { value: 'auto', label: 'Авто' },
+]
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -15,6 +22,7 @@ export function SourcesPage() {
 
   const [type, setType] = useState<'group' | 'chat' | 'channel'>('group')
   const [identifier, setIdentifier] = useState('')
+  const [newCollectMode, setNewCollectMode] = useState<CollectMode>('participants')
   const [filter, setFilter] = useState('')
   const canSubmit = useMemo(() => identifier.trim().length > 0, [identifier])
   const filtered = useMemo(() => {
@@ -47,7 +55,12 @@ export function SourcesPage() {
     setErr(null)
     setErrCode(null)
     try {
-      await api.createSource({ type, identifier: identifier.trim(), enabled: true })
+      await api.createSource({
+        type,
+        identifier: identifier.trim(),
+        enabled: true,
+        collect_mode: newCollectMode,
+      })
       setIdentifier('')
       await load()
     } catch (e) {
@@ -65,6 +78,23 @@ export function SourcesPage() {
     setErrCode(null)
     try {
       await api.patchSource(src.id, { enabled: !src.enabled })
+      await load()
+    } catch (e) {
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onCollectModeChange(src: Source, mode: CollectMode) {
+    if (src.collect_mode === mode) return
+    setBusy(true)
+    setErr(null)
+    setErrCode(null)
+    try {
+      await api.patchSource(src.id, { collect_mode: mode })
       await load()
     } catch (e) {
       const f = formatApiError(e)
@@ -124,12 +154,28 @@ export function SourcesPage() {
             />
           </label>
 
+          <label className="field">
+            <div className="label">Сбор контактов</div>
+            <select
+              value={newCollectMode}
+              onChange={(e) => setNewCollectMode(e.target.value as CollectMode)}
+              disabled={busy}
+              title="Где воркер ищет людей для этого источника"
+            >
+              {COLLECT_MODE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <button type="button" className="btn primary" onClick={() => void onCreate()} disabled={busy || !canSubmit}>
             Добавить
           </button>
         </div>
         <div className="hint">
-          Запись требует <code>VITE_ADMIN_TOKEN</code>, если на API задан <code>ADMIN_TOKEN</code>. Название и число подписчиков подтягиваются кнопкой «Обновить из Telegram» в списке (нужна сессия воркера с Telethon).
+          Запись требует <code>VITE_ADMIN_TOKEN</code>, если на API задан <code>ADMIN_TOKEN</code>. Название и число подписчиков подтягиваются кнопкой «Обновить из Telegram» в списке (нужна сессия воркера с Telethon). «Чат (авторы)» — недавние отправители сообщений; «Авто» — если список участников пуст, тогда из чата.
         </div>
       </section>
 
@@ -159,6 +205,7 @@ export function SourcesPage() {
                 <th>Telegram</th>
                 <th>Подписчики</th>
                 <th>Мета</th>
+                <th>Сбор</th>
                 <th>Статус</th>
                 <th />
               </tr>
@@ -172,6 +219,21 @@ export function SourcesPage() {
                   <td>{s.telegram_title ?? '—'}</td>
                   <td>{s.telegram_participants_count != null ? s.telegram_participants_count.toLocaleString() : '—'}</td>
                   <td className="mono small">{s.telegram_meta_updated_at ?? '—'}</td>
+                  <td>
+                    <select
+                      className="selectInTable"
+                      value={s.collect_mode ?? 'participants'}
+                      onChange={(e) => void onCollectModeChange(s, e.target.value as CollectMode)}
+                      disabled={busy}
+                      title="Режим сбора для воркера"
+                    >
+                      {COLLECT_MODE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td>{s.enabled ? 'Включен' : 'Выключен'}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button type="button" className="btn" onClick={() => void onRefreshMeta(s)} disabled={busy} title="Запросить title и participants_count через воркер">
