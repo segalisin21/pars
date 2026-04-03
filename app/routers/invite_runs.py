@@ -4,13 +4,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, InviteRun, InviteTarget, utcnow
+from app.models import AuditEvent, InviteRun, InviteTarget, Source, utcnow
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import InviteRunCreate, InviteRunOut, InviteRunsList
 from app.services import process_invite_run, run_invite
 from app.telegram_client import TelegramClient
 from app.worker_jobs import execute_invite_run
+
+
+def _invite_run_out(run: InviteRun) -> InviteRunOut:
+    raw = getattr(run, "source_ids", None)
+    source_ids = list(raw) if isinstance(raw, list) else []
+    return InviteRunOut(
+        id=run.id,
+        status=run.status,
+        target_id=run.target_id,
+        source_ids=source_ids,
+        policy=run.policy,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        stats=run.stats,
+    )
 
 
 def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
@@ -41,11 +56,20 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                 detail={"error": {"code": "validation_error", "message": "Invalid target state", "details": {}}},
             )
 
+        for sid in payload.source_ids:
+            src = db.get(Source, sid)
+            if src is None or src.workspace_id != workspace_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": sid}}},
+                )
+
         if is_queue_enabled():
             run = InviteRun(
                 workspace_id=workspace_id,
                 status="queued",
                 target_id=payload.target_id,
+                source_ids=payload.source_ids,
                 policy=payload.policy.model_dump(),
                 stats={},
             )
@@ -64,22 +88,21 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                     action="invite.start",
                     entity_type="invite_run",
                     entity_id=run.id,
-                    meta={"target_id": payload.target_id},
+                    meta={"target_id": payload.target_id, "source_ids": payload.source_ids},
                 )
             )
             db.commit()
-            return InviteRunOut(
-                id=run.id,
-                status=run.status,
-                target_id=run.target_id,
-                policy=run.policy,
-                started_at=run.started_at,
-                finished_at=run.finished_at,
-                stats=run.stats,
-            )
+            return _invite_run_out(run)
 
         try:
-            run = run_invite(db, tg, payload.target_id, payload.policy.model_dump(), workspace_id)
+            run = run_invite(
+                db,
+                tg,
+                payload.target_id,
+                payload.policy.model_dump(),
+                workspace_id,
+                source_ids=payload.source_ids,
+            )
             db.commit()
             db.refresh(run)
         except KeyError as e:
@@ -94,35 +117,14 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                 detail={"error": {"code": "validation_error", "message": "Invalid target state", "details": {}}},
             )
 
-        return InviteRunOut(
-            id=run.id,
-            status=run.status,
-            target_id=run.target_id,
-            policy=run.policy,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            stats=run.stats,
-        )
+        return _invite_run_out(run)
 
     @router.get("/invite-runs", response_model=InviteRunsList)
     def list_invite_runs(db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
         runs = db.scalars(
             select(InviteRun).where(InviteRun.workspace_id == workspace_id).order_by(InviteRun.id.desc())
         ).all()
-        return InviteRunsList(
-            items=[
-                InviteRunOut(
-                    id=r.id,
-                    status=r.status,
-                    target_id=r.target_id,
-                    policy=r.policy,
-                    started_at=r.started_at,
-                    finished_at=r.finished_at,
-                    stats=r.stats,
-                )
-                for r in runs
-            ]
-        )
+        return InviteRunsList(items=[_invite_run_out(r) for r in runs])
 
     @router.get("/invite-runs/{run_id}", response_model=InviteRunOut)
     def get_invite_run(run_id: int, db: Session = Depends(get_db), workspace_id: int = Depends(get_workspace_id)):
@@ -132,15 +134,7 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                 status_code=404,
                 detail={"error": {"code": "invite_run_not_found", "message": "Invite run not found", "details": {"id": run_id}}},
             )
-        return InviteRunOut(
-            id=run.id,
-            status=run.status,
-            target_id=run.target_id,
-            policy=run.policy,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            stats=run.stats,
-        )
+        return _invite_run_out(run)
 
     @router.post("/invite-runs/{run_id}/resume", response_model=InviteRunOut, status_code=202)
     def resume_invite_run(
@@ -190,15 +184,7 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                 )
             )
             db.commit()
-            return InviteRunOut(
-                id=run.id,
-                status=run.status,
-                target_id=run.target_id,
-                policy=run.policy,
-                started_at=run.started_at,
-                finished_at=run.finished_at,
-                stats=run.stats,
-            )
+            return _invite_run_out(run)
 
         try:
             process_invite_run(db, tg, run)
@@ -227,15 +213,7 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
         )
         db.commit()
         db.refresh(run)
-        return InviteRunOut(
-            id=run.id,
-            status=run.status,
-            target_id=run.target_id,
-            policy=run.policy,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            stats=run.stats,
-        )
+        return _invite_run_out(run)
 
     @router.post("/invite-runs/{run_id}/cancel", response_model=InviteRunOut)
     def cancel_invite_run(
@@ -278,14 +256,6 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
         )
         db.commit()
         db.refresh(run)
-        return InviteRunOut(
-            id=run.id,
-            status=run.status,
-            target_id=run.target_id,
-            policy=run.policy,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            stats=run.stats,
-        )
+        return _invite_run_out(run)
 
     return router

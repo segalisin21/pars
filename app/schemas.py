@@ -125,12 +125,20 @@ class InvitePolicy(BaseModel):
 class InviteRunCreate(BaseModel):
     target_id: int
     policy: InvitePolicy = Field(default_factory=InvitePolicy)
+    # Empty = invite from all candidates in workspace; otherwise only candidates collected from these sources.
+    source_ids: list[int] = Field(default_factory=list, max_length=50)
+
+    @field_validator("source_ids", mode="after")
+    @classmethod
+    def _dedupe_source_ids(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
 
 
 class InviteRunOut(BaseModel):
     id: int
     status: str
     target_id: int
+    source_ids: list[int]
     policy: dict[str, Any]
     started_at: datetime
     finished_at: datetime | None

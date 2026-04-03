@@ -155,6 +155,7 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
   "id": 20,
   "status": "running",
   "target_id": 1,
+  "source_ids": [],
   "policy": {
     "max_per_minute": 2,
     "max_per_hour": 30,
@@ -181,6 +182,8 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
 ```
 
 `status` values: `queued` | `running` | `succeeded` | `failed` | `cancelled` | `paused`
+
+`source_ids`: list of source ids. **Empty** = invite from **all** candidates in the workspace (default). **Non-empty** = only candidates that have a `candidate_source_links` row for at least one of these sources (same workspace).
 
 **`stats` (invite v1.5):**
 
@@ -320,15 +323,19 @@ Request:
     "max_per_minute": 2,
     "max_per_hour": 30,
     "cooldown_minutes": 1440
-  }
+  },
+  "source_ids": []
 }
 ```
+
+`source_ids` optional; defaults to `[]` (all workspace candidates). Duplicate ids are deduplicated server-side. Each id must exist in the current workspace or the API returns `404` `source_not_found`.
 
 Response `202`: InviteRun
 
 Errors:
 - `400` `validation_error`
 - `404` `target_not_found`
+- `404` `source_not_found`
 
 #### `GET /invite-runs/{id}`
 Get run status.

@@ -134,6 +134,8 @@ class InviteRun(Base):
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     target_id: Mapped[int] = mapped_column(ForeignKey("invite_targets.id"), nullable=False, index=True)
+    # Empty list = all candidates in workspace; otherwise only candidates linked to these sources.
+    source_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
     policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

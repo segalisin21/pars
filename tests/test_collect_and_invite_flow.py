@@ -27,6 +27,28 @@ def test_collect_run_persists_candidates_and_invite_uses_tg_ids(client, fake_tg)
     assert ("tgt1", 2) in fake_tg.invite_calls
 
 
+def test_invite_run_respects_source_ids_filter(client, fake_tg):
+    s1 = client.post("/sources", json={"type": "group", "identifier": "@srcA", "enabled": True}).json()
+    s2 = client.post("/sources", json={"type": "group", "identifier": "@srcB", "enabled": True}).json()
+    t = client.post("/targets", json={"identifier": "@tgt_filter", "enabled": True}).json()
+    fake_tg.participants_by_source["srcA"] = [TgUser(tg_user_id=101, username="a")]
+    fake_tg.participants_by_source["srcB"] = [TgUser(tg_user_id=102, username="b")]
+    assert client.post("/collect-runs", json={"source_ids": [s1["id"]]}).json()["status"] == "succeeded"
+    assert client.post("/collect-runs", json={"source_ids": [s2["id"]]}).json()["status"] == "succeeded"
+    ir = client.post(
+        "/invite-runs",
+        json={
+            "target_id": t["id"],
+            "policy": {"max_per_minute": 2, "max_per_hour": 30, "cooldown_minutes": 0},
+            "source_ids": [s1["id"]],
+        },
+    ).json()
+    assert ir["status"] == "succeeded"
+    assert ir["source_ids"] == [s1["id"]]
+    assert ("tgt_filter", 101) in fake_tg.invite_calls
+    assert ("tgt_filter", 102) not in fake_tg.invite_calls
+
+
 def test_invite_flood_wait_is_recorded_in_stats(client, fake_tg):
     s = client.post("/sources", json={"type": "group", "identifier": "@src2", "enabled": True}).json()
     t = client.post("/targets", json={"identifier": "@tgt2", "enabled": True}).json()

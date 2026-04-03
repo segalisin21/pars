@@ -112,7 +112,7 @@ Statuses (suggested)
 
 ### Flow C: Gradual invite into target
 
-1. Admin starts an **InviteRun** with `target_id` and a pacing policy.
+1. Admin starts an **InviteRun** with `target_id` and a pacing policy. Optionally `source_ids`: if empty, every eligible workspace candidate is considered; if set, only candidates linked to those sources via collection (`candidate_source_links`) are in the invite pool.
 2. Service selects **eligible candidates**:
    - not suppressed
    - not already invited successfully to this target
@@ -239,7 +239,7 @@ A thin, separately-deployed web UI gives the operator visibility and control wit
 | Sources | text «Загрузка» | copy + CTA | `Banner` + retry | Skeleton optional (v1.1) |
 | Targets | same | same | same | — |
 | Collect | same | «нет запусков» | same | Polling while any run `queued`/`running`; deep link `/collect/:id` |
-| Invite | same | same | same | Polling while `queued`/`running`; `/invite/:id` shows `paused`, `pause_reason`, `next_eligible_at`, `failed_by_code`, **Resume** / **Cancel**; policy presets (local) |
+| Invite | same | same | same | Polling while `queued`/`running`; optional source chips restrict the candidate pool; `/invite/:id` shows `paused`, `pause_reason`, `next_eligible_at`, `failed_by_code`, **Resume** / **Cancel**; policy presets (local) |
 | Candidates | same | empty copy | same | Filters + pagination; mask `tg_user_id` in list |
 | Attempts / Suppression / Audit | same | empty | same | Filters |
 

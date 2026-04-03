@@ -40,6 +40,8 @@ export type InviteRun = {
   id: number
   status: string
   target_id: number
+  /** Empty = all workspace candidates; otherwise only candidates linked to these sources. */
+  source_ids?: number[]
   policy: Record<string, unknown>
   started_at: string
   finished_at: string | null
@@ -268,8 +270,11 @@ export const api = {
 
   listInviteRuns: () => request<{ items: InviteRun[] }>('/invite-runs'),
   getInviteRun: (id: number) => request<InviteRun>(`/invite-runs/${id}`),
-  startInviteRun: (payload: { target_id: number; policy?: Record<string, unknown> }) =>
-    request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
+  startInviteRun: (payload: {
+    target_id: number
+    policy?: Record<string, unknown>
+    source_ids?: number[]
+  }) => request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
   resumeInviteRun: (id: number) =>
     request<InviteRun>(`/invite-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
   cancelInviteRun: (id: number) =>

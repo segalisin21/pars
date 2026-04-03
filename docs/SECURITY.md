@@ -106,7 +106,7 @@ Hard requirements:
 
 ### Operational safety rails
 
-- Maximum `source_ids` per collect run (e.g. 50).
+- Maximum `source_ids` per collect run (e.g. 50); same cap on optional `source_ids` for invite runs (scoped to workspace, each id validated).
 - Maximum candidates processed per invite run batch (e.g. 100) unless explicitly configured.
 - Explicit "dry-run mode" (optional for v1; recommended for v1.1).
 

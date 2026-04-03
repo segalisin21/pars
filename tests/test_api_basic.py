@@ -62,3 +62,17 @@ def test_invite_run_unknown_target_returns_404(client):
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "target_not_found"
 
+
+def test_invite_run_unknown_source_returns_404(client):
+    t = client.post("/targets", json={"identifier": "@tgt_src_chk", "enabled": True}).json()
+    r = client.post(
+        "/invite-runs",
+        json={
+            "target_id": t["id"],
+            "policy": {"max_per_minute": 2, "max_per_hour": 30, "cooldown_minutes": 0},
+            "source_ids": [999999],
+        },
+    )
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "source_not_found"
+

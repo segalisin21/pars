@@ -818,6 +818,26 @@ pytest tests/ -v --tb=short
 - CI must install `requirements-dev.txt` (or equivalent) to run tests.
 
 
+## 2026-04-03 (feat: invite run source_ids)
+
+### What changed
+
+- **Invite runs** accept optional `source_ids` on `POST /invite-runs`: **empty** = all workspace candidates (unchanged behavior); **non-empty** = only candidates linked via `candidate_source_links` to those sources. Stored on `InviteRun`, returned on list/detail.
+- **Backend:** [`app/models.py`](app/models.py) `InviteRun.source_ids` (JSON); [`app/services.py`](app/services.py) `process_invite_run` filters `CandidateUser` when set; [`app/schemas.py`](app/schemas.py) + [`app/routers/invite_runs.py`](app/routers/invite_runs.py) validation (same pattern as collect runs).
+- **UI:** [`ui/src/pages/InvitePage.tsx`](ui/src/pages/InvitePage.tsx) optional source chips; [`ui/src/lib/api.ts`](ui/src/lib/api.ts) types + `startInviteRun` payload.
+- **Migrations:** [`scripts/migrate_invite_run_source_ids_pg.sql`](scripts/migrate_invite_run_source_ids_pg.sql), [`scripts/migrate_invite_run_source_ids_sqlite.sql`](scripts/migrate_invite_run_source_ids_sqlite.sql) for existing DBs.
+- **Docs:** [`docs/REPORT.md`](docs/REPORT.md), [`docs/DESIGN.md`](docs/DESIGN.md).
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Existing production DBs need the migration SQL once before deploy (new installs use `create_all` / fresh schema).
+
 ## 2026-04-03 (git: push to `test`)
 
 - **Commit:** `7a3bb58` — `feat(api): invite v1.5 stats, resume/cancel, APIRouter split, pinned deps, admin auth tests`

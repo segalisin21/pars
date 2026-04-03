@@ -486,6 +486,19 @@ def _invite_run_stats_payload(
     return out
 
 
+def _invite_run_source_ids(run: InviteRun) -> list[int]:
+    raw = getattr(run, "source_ids", None)
+    if not isinstance(raw, list) or len(raw) == 0:
+        return []
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -> InviteRun:
     workspace_id = run.workspace_id
     run.status = "running"
@@ -519,6 +532,18 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
 
     resume_after = int(prev.get("resume_after_candidate_id") or 0)
 
+    source_ids_filter = _invite_run_source_ids(run)
+    linked_subq = None
+    if source_ids_filter:
+        linked_subq = (
+            select(CandidateSourceLink.candidate_id)
+            .where(
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.source_id.in_(source_ids_filter),
+            )
+            .distinct()
+        )
+
     max_per_minute = int(policy.get("max_per_minute", 2))
     max_per_hour = int(policy.get("max_per_hour", 30))
     window_min_start = monotonic()
@@ -533,10 +558,14 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     )
     if resume_after > 0:
         cand_stmt = cand_stmt.where(CandidateUser.id >= resume_after)
+    if linked_subq is not None:
+        cand_stmt = cand_stmt.where(CandidateUser.id.in_(linked_subq))
 
     count_q = select(func.count()).select_from(CandidateUser).where(CandidateUser.workspace_id == workspace_id)
     if resume_after > 0:
         count_q = count_q.where(CandidateUser.id >= resume_after)
+    if linked_subq is not None:
+        count_q = count_q.where(CandidateUser.id.in_(linked_subq))
     scan_total = int(db.scalar(count_q) or 0)
 
     candidates = db.scalars(cand_stmt).all()
@@ -705,11 +734,21 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     return run
 
 
-def run_invite(db: Session, tg_client: TelegramClient, target_id: int, policy: dict, workspace_id: int) -> InviteRun:
+def run_invite(
+    db: Session,
+    tg_client: TelegramClient,
+    target_id: int,
+    policy: dict,
+    workspace_id: int,
+    *,
+    source_ids: list[int] | None = None,
+) -> InviteRun:
+    ids = list(source_ids) if source_ids is not None else []
     run = InviteRun(
         workspace_id=workspace_id,
         status="running",
         target_id=target_id,
+        source_ids=ids,
         policy=policy,
         started_at=utcnow(),
         stats={},

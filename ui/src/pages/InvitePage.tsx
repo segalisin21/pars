@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, apiBaseUrl } from '../lib/api'
-import type { InviteRun, Target } from '../lib/api'
+import type { InviteRun, Source, Target } from '../lib/api'
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -75,8 +75,10 @@ export function InvitePage() {
   const runId = runIdParam ? Number(runIdParam) : null
 
   const [targets, setTargets] = useState<Target[] | null>(null)
+  const [sources, setSources] = useState<Source[] | null>(null)
   const [runs, setRuns] = useState<InviteRun[] | null>(null)
   const [targetId, setTargetId] = useState<number | null>(null)
+  const [inviteSourceIds, setInviteSourceIds] = useState<Set<number>>(new Set())
   const [preset, setPreset] = useState<InvitePolicyPresetId>(() => readStoredPreset())
   const [focusedRun, setFocusedRun] = useState<InviteRun | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -86,7 +88,17 @@ export function InvitePage() {
   const didInitTarget = useRef(false)
 
   const enabledTargets = useMemo(() => (targets ?? []).filter((t) => t.enabled), [targets])
+  const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
   const canStart = targetId !== null
+
+  function toggleInviteSource(id: number) {
+    setInviteSourceIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const onPresetChange = (id: InvitePolicyPresetId) => {
     setPreset(id)
@@ -101,8 +113,9 @@ export function InvitePage() {
     setErr(null)
     setErrCode(null)
     try {
-      const [t, r] = await Promise.all([api.listTargets(), api.listInviteRuns()])
+      const [t, s, r] = await Promise.all([api.listTargets(), api.listSources(), api.listInviteRuns()])
       setTargets(t.items)
+      setSources(s.items)
       setRuns(r.items)
       if (!didInitTarget.current && t.items.length > 0) {
         didInitTarget.current = true
@@ -124,6 +137,7 @@ export function InvitePage() {
       setErr(f.message)
       setErrCode(f.code ?? null)
       setTargets(null)
+      setSources(null)
       setRuns(null)
     }
   }, [runId])
@@ -168,9 +182,12 @@ export function InvitePage() {
     setErrCode(null)
     const p = INVITE_POLICY_PRESETS[preset]
     try {
+      const source_ids =
+        inviteSourceIds.size === 0 ? [] : [...inviteSourceIds].sort((a, b) => a - b)
       await api.startInviteRun({
         target_id: targetId,
         policy: { max_per_minute: p.max_per_minute, max_per_hour: p.max_per_hour, cooldown_minutes: p.cooldown_minutes },
+        source_ids,
       })
       await load()
     } catch (e) {
@@ -257,6 +274,12 @@ export function InvitePage() {
               <div className="mono small" style={{ marginTop: 8 }}>
                 Цель id: {focusedRun.target_id}
               </div>
+              <div className="mono small" style={{ marginTop: 4 }}>
+                Источники кандидатов:{' '}
+                {(focusedRun.source_ids?.length ?? 0) === 0
+                  ? 'все кандидаты воркспейса'
+                  : (focusedRun.source_ids ?? []).join(', ')}
+              </div>
               {(() => {
                 const st = focusedRun.stats ?? {}
                 const pr = st.pause_reason ? String(st.pause_reason) : null
@@ -339,40 +362,70 @@ export function InvitePage() {
 
       <section className="card">
         <div className="cardTitle">Запуск инвайта</div>
-        {targets === null ? (
+        {targets === null || sources === null ? (
           <SkeletonBlock lines={2} />
         ) : enabledTargets.length === 0 ? (
           <EmptyState title="Нет активных целей" hint="Создайте и включите цель на странице «Цели»." />
         ) : (
-          <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
-            <label className="field grow">
-              <div className="label">Цель</div>
-              <select
-                value={targetId ?? ''}
-                onChange={(e) => setTargetId(e.target.value ? Number(e.target.value) : null)}
-                disabled={busy}
-              >
-                {enabledTargets.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    #{t.id} @{t.identifier}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <div className="label">Политика</div>
-              <select value={preset} onChange={(e) => onPresetChange(e.target.value as InvitePolicyPresetId)} disabled={busy}>
-                {(Object.keys(INVITE_POLICY_PRESETS) as InvitePolicyPresetId[]).map((k) => (
-                  <option key={k} value={k}>
-                    {INVITE_POLICY_PRESETS[k].label} ({INVITE_POLICY_PRESETS[k].max_per_minute}/мин, {INVITE_POLICY_PRESETS[k].max_per_hour}/ч)
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" className="btn primary" onClick={() => void start()} disabled={busy || !canStart}>
-              {busy ? 'Запуск…' : 'Запустить инвайт'}
-            </button>
-          </div>
+          <>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+              <label className="field grow">
+                <div className="label">Цель</div>
+                <select
+                  value={targetId ?? ''}
+                  onChange={(e) => setTargetId(e.target.value ? Number(e.target.value) : null)}
+                  disabled={busy}
+                >
+                  {enabledTargets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      #{t.id} @{t.identifier}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <div className="label">Политика</div>
+                <select value={preset} onChange={(e) => onPresetChange(e.target.value as InvitePolicyPresetId)} disabled={busy}>
+                  {(Object.keys(INVITE_POLICY_PRESETS) as InvitePolicyPresetId[]).map((k) => (
+                    <option key={k} value={k}>
+                      {INVITE_POLICY_PRESETS[k].label} ({INVITE_POLICY_PRESETS[k].max_per_minute}/мин, {INVITE_POLICY_PRESETS[k].max_per_hour}/ч)
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="btn primary" onClick={() => void start()} disabled={busy || !canStart}>
+                {busy ? 'Запуск…' : 'Запустить инвайт'}
+              </button>
+            </div>
+            {enabledSources.length > 0 ? (
+              <>
+                <div className="label" style={{ marginTop: 14 }}>
+                  Ограничить кандидатов по источникам (опционально)
+                </div>
+                <div className="chips" style={{ marginTop: 6 }}>
+                  {enabledSources.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={inviteSourceIds.has(s.id) ? 'chip selected' : 'chip'}
+                      onClick={() => toggleInviteSource(s.id)}
+                      disabled={busy}
+                      title={`#${s.id} @${s.identifier}`}
+                    >
+                      #{s.id} @{s.identifier}
+                    </button>
+                  ))}
+                </div>
+                <div className="hint" style={{ marginTop: 8 }}>
+                  Не выбрано ни одного источника — в очередь попадут все кандидаты воркспейса. Отметьте источники, чтобы приглашать только тех, кто был собран из них.
+                </div>
+              </>
+            ) : (
+              <div className="hint" style={{ marginTop: 10 }}>
+                Нет активных источников — инвайт пойдёт по всем кандидатам воркспейса. Добавьте источники на странице «Источники», если нужно ограничить пул.
+              </div>
+            )}
+          </>
         )}
         <div className="hint" style={{ marginTop: 10 }}>
           Если статус <code>paused</code> — смотрите <code>pause_reason</code> и <code>next_eligible_at</code>; при{' '}
@@ -394,6 +447,7 @@ export function InvitePage() {
                 <th>Статус</th>
                 <th>Пауза / дальше</th>
                 <th>Цель</th>
+                <th>Источники</th>
                 <th>Старт</th>
                 <th>Итоги</th>
                 <th />
@@ -445,6 +499,13 @@ export function InvitePage() {
                       )}
                     </td>
                     <td className="mono small">{r.target_id}</td>
+                    <td className="mono small">
+                      {(r.source_ids?.length ?? 0) === 0 ? (
+                        <span className="muted">все</span>
+                      ) : (
+                        (r.source_ids ?? []).join(', ')
+                      )}
+                    </td>
                     <td className="mono small">{r.started_at}</td>
                     <td>
                       <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
