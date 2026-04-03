@@ -12,7 +12,6 @@ pytest tests/ -v --tb=short
 
 ### What we test (v1)
 
-- **Alembic** (`tests/test_migrations.py`): `upgrade head` creates `alembic_version` and app tables; second run is a no-op (startup path uses the same code).
 - **API contracts**:
   - create/list sources
   - create/list targets

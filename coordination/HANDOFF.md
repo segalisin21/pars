@@ -836,27 +836,7 @@ pytest tests/ -v --tb=short
 
 ### Risks / known limitations
 
-- Superseded by Alembic baseline: new deploys run `alembic upgrade head`; legacy DBs may still use the SQL scripts once, then `alembic stamp`.
-
-## 2026-04-03 (feat: Alembic migrations)
-
-### What changed
-
-- **Alembic** added (`alembic==1.15.2` in [`requirements.txt`](requirements.txt)); [`alembic/env.py`](alembic/env.py) targets `Base.metadata` from [`app/models.py`](app/models.py).
-- **Startup:** [`app/main.py`](app/main.py) and [`app/worker_jobs.py`](app/worker_jobs.py) call [`app/migration.py`](app/migration.py) `upgrade_to_head()` instead of `Base.metadata.create_all()`.
-- **Initial revision:** [`alembic/versions/f61c3cd9340b_initial_schema.py`](alembic/versions/f61c3cd9340b_initial_schema.py) — full v1 schema. Further model changes: `alembic revision --autogenerate` (see [`docs/REPORT.md`](docs/REPORT.md)).
-- **Tests:** [`tests/test_migrations.py`](tests/test_migrations.py); [`tests/conftest.py`](tests/conftest.py) unchanged (in-memory `create_all` for speed).
-- **Docs:** [`docs/REPORT.md`](docs/REPORT.md), [`docs/RAILWAY.md`](docs/RAILWAY.md), [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md).
-
-### How to verify
-
-```bash
-pytest tests/ -v --tb=short
-```
-
-### Risks / known limitations
-
-- DB created only with old `create_all` and **no** `alembic_version`: one-time `alembic stamp f61c3cd9340b` if schema matches `initial_schema`, else fix drift then stamp.
+- Existing production DBs need the migration SQL once before deploy (new installs use `create_all` / fresh schema).
 
 ## 2026-04-03 (git: push to `test`)
 

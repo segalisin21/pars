@@ -66,17 +66,6 @@ All non-2xx responses use:
 - **Production / worker:** `pip install -r requirements.txt` (pinned versions).
 - **Tests / local dev:** `pip install -r requirements-dev.txt` (includes `requirements.txt` + `pytest`).
 
-### Database migrations (Alembic)
-
-The app **no longer** relies on `Base.metadata.create_all()` for production schema updates. On startup, the API and RQ worker run **`alembic upgrade head`** (`app/migration.py`) so existing databases pick up new columns/tables without wiping data.
-
-| Action | Command / note |
-|--------|------------------|
-| Apply migrations (deploy / local file DB) | Automatic on process start; or manually: `DATABASE_URL=... alembic upgrade head` from repo root |
-| Add a migration after changing `app/models.py` | Set `DATABASE_URL` to a throwaway or empty DB, then `alembic revision --autogenerate -m "short description"`. Edit `alembic/versions/<rev>_<slug>.py` if needed, commit, deploy |
-| **Legacy DB** (tables exist from old `create_all`, no `alembic_version`) | If the schema already matches revision `f61c3cd9340b` (`initial_schema`), run **once**: `DATABASE_URL=... alembic stamp f61c3cd9340b` so Alembic skips re-creating tables. If the schema is older, run the relevant `scripts/migrate_*.sql` (or fix drift), then `stamp` to the matching revision |
-| Tests | `tests/conftest.py` still uses `create_all` on an in-memory SQLite DB for speed; see `tests/test_migrations.py` for Alembic smoke coverage |
-
 ## Schemas (v1)
 
 ### Source

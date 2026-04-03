@@ -9,8 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, TimeoutError as SATimeoutError
-from app.db import create_postgres_engine, create_session_factory, create_sqlite_engine
-from app.migration import upgrade_to_head
+from app.db import Base, create_postgres_engine, create_session_factory, create_sqlite_engine
 from app.dependencies import get_db as make_get_db, get_tg_client as make_get_tg, get_workspace_id
 from app.models import Source, Workspace
 from app.routers import register_routes
@@ -112,7 +111,7 @@ def create_app(
             engine = create_postgres_engine(db_url)
         else:
             engine = create_sqlite_engine("sqlite:///./app.db")
-        upgrade_to_head(str(engine.url))
+        Base.metadata.create_all(engine)
         session_factory = create_session_factory(engine)
 
     _ensure_default_workspace(session_factory)

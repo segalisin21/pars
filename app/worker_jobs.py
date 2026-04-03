@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from app.migration import upgrade_to_head
+from app.db import Base
 from app.models import CollectRun, InviteRun, Source
 from app.services import process_collect_run, process_invite_run, refresh_source_telegram_meta
 from app.telegram_client import TelegramClient
@@ -31,7 +31,7 @@ def _get_session_factory() -> sessionmaker[Session]:
         poolclass=NullPool,
         pool_pre_ping=True,
     )
-    upgrade_to_head(str(engine.url))
+    Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)
 
 
