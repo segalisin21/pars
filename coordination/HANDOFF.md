@@ -816,3 +816,9 @@ pytest tests/ -v --tb=short
 ### Risks / known limitations
 
 - CI must install `requirements-dev.txt` (or equivalent) to run tests.
+
+
+## 2026-04-03 (git: push to `test`)
+
+- **Commit:** `7a3bb58` — `feat(api): invite v1.5 stats, resume/cancel, APIRouter split, pinned deps, admin auth tests`
+- **Remote:** `git push origin master:test` → `https://github.com/segalisin21/pars.git` branch `test` updated.
