@@ -408,10 +408,89 @@ def is_suppressed(db: Session, workspace_id: int, candidate: CandidateUser, now:
     return False
 
 
+def _classify_invite_error(exc: BaseException) -> str:
+    """Map Telethon/RPC errors to stable error_code strings."""
+    if isinstance(exc, FloodWaitError):
+        return "flood_wait"
+    name = type(exc).__name__
+    mapping = {
+        "UserPrivacyRestrictedError": "privacy_restricted",
+        "UserAlreadyParticipantError": "already_member",
+        "UserNotMutualContactError": "not_mutual_contact",
+        "UserDeletedError": "user_deleted",
+        "UserBotError": "user_bot",
+        "ChannelPrivateError": "channel_private",
+        "ChatAdminRequiredError": "admin_required",
+        "InviteHashExpiredError": "invite_expired",
+    }
+    if name in mapping:
+        return mapping[name]
+    return "unknown"
+
+
+def _merge_failed_by_code(base: dict[str, int], code: str) -> None:
+    base[code] = base.get(code, 0) + 1
+
+
+def _compute_next_eligible_at_pacing(
+    *,
+    sent_in_min: int,
+    sent_in_hour: int,
+    max_per_minute: int,
+    max_per_hour: int,
+    window_min_start: float,
+    window_hour_start: float,
+) -> datetime:
+    now_m = monotonic()
+    wait_s = 0.0
+    if sent_in_min >= max_per_minute:
+        wait_s = max(wait_s, max(0.0, 60.0 - (now_m - window_min_start)))
+    if sent_in_hour >= max_per_hour:
+        wait_s = max(wait_s, max(0.0, 3600.0 - (now_m - window_hour_start)))
+    return utcnow() + timedelta(seconds=int(max(1, wait_s)))
+
+
+def _invite_run_stats_payload(
+    *,
+    attempted: int,
+    success: int,
+    skipped: int,
+    failed: int,
+    failed_by_code: dict[str, int],
+    last_candidate_id: int | None = None,
+    resume_after_candidate_id: int | None = None,
+    pause_reason: str | None = None,
+    next_eligible_at: datetime | None = None,
+    remaining_candidates: int | None = None,
+    flood_wait_seconds: int | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "attempted": attempted,
+        "success": success,
+        "skipped": skipped,
+        "failed": failed,
+        "failed_by_code": dict(failed_by_code),
+    }
+    if last_candidate_id is not None:
+        out["last_candidate_id"] = last_candidate_id
+    if resume_after_candidate_id is not None:
+        out["resume_after_candidate_id"] = resume_after_candidate_id
+    if pause_reason is not None:
+        out["pause_reason"] = pause_reason
+    if next_eligible_at is not None:
+        out["next_eligible_at"] = next_eligible_at.isoformat()
+    if remaining_candidates is not None:
+        out["remaining_candidates"] = remaining_candidates
+    if flood_wait_seconds is not None:
+        out["flood_wait_seconds"] = flood_wait_seconds
+    return out
+
+
 def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -> InviteRun:
     workspace_id = run.workspace_id
     run.status = "running"
-    run.started_at = utcnow()
+    if run.started_at is None:
+        run.started_at = utcnow()
     run.finished_at = None
     if not isinstance(run.stats, dict):
         run.stats = {}
@@ -431,8 +510,14 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     cooldown_minutes = int(policy.get("cooldown_minutes", 1440))
     cooldown_since = now - timedelta(minutes=cooldown_minutes)
 
-    attempted = success = skipped = failed = 0
-    failed_by_code: dict[str, int] = {}
+    prev = dict(run.stats) if isinstance(run.stats, dict) else {}
+    attempted = int(prev.get("attempted", 0))
+    success = int(prev.get("success", 0))
+    skipped = int(prev.get("skipped", 0))
+    failed = int(prev.get("failed", 0))
+    failed_by_code: dict[str, int] = {k: int(v) for k, v in (prev.get("failed_by_code") or {}).items() if isinstance(k, str)}
+
+    resume_after = int(prev.get("resume_after_candidate_id") or 0)
 
     max_per_minute = int(policy.get("max_per_minute", 2))
     max_per_hour = int(policy.get("max_per_hour", 30))
@@ -441,12 +526,29 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
     sent_in_min = 0
     sent_in_hour = 0
 
-    candidates = db.scalars(
+    cand_stmt = (
         select(CandidateUser)
         .where(CandidateUser.workspace_id == workspace_id)
         .order_by(CandidateUser.id.asc())
-    ).all()
-    for cand in candidates:
+    )
+    if resume_after > 0:
+        cand_stmt = cand_stmt.where(CandidateUser.id >= resume_after)
+
+    count_q = select(func.count()).select_from(CandidateUser).where(CandidateUser.workspace_id == workspace_id)
+    if resume_after > 0:
+        count_q = count_q.where(CandidateUser.id >= resume_after)
+    scan_total = int(db.scalar(count_q) or 0)
+
+    candidates = db.scalars(cand_stmt).all()
+    last_candidate_id: int | None = None
+    if prev.get("last_candidate_id") is not None:
+        try:
+            last_candidate_id = int(prev["last_candidate_id"])
+        except (TypeError, ValueError):
+            last_candidate_id = None
+
+    for idx, cand in enumerate(candidates):
+        remaining_candidates = max(0, scan_total - idx)
         if is_suppressed(db, workspace_id, cand, now):
             continue
 
@@ -477,6 +579,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             continue
 
         attempted += 1
+        last_candidate_id = cand.id
         if cand.tg_user_id is None:
             skipped += 1
             db.add(
@@ -501,15 +604,27 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
                 window_hour_start = now_m
                 sent_in_hour = 0
             if sent_in_min >= max_per_minute or sent_in_hour >= max_per_hour:
+                next_eligible_at = _compute_next_eligible_at_pacing(
+                    sent_in_min=sent_in_min,
+                    sent_in_hour=sent_in_hour,
+                    max_per_minute=max_per_minute,
+                    max_per_hour=max_per_hour,
+                    window_min_start=window_min_start,
+                    window_hour_start=window_hour_start,
+                )
                 run.status = "paused"
-                run.stats = {
-                    "attempted": attempted,
-                    "success": success,
-                    "skipped": skipped,
-                    "failed": failed,
-                    "failed_by_code": failed_by_code,
-                    "pause_reason": "pacing_limit",
-                }
+                run.stats = _invite_run_stats_payload(
+                    attempted=attempted,
+                    success=success,
+                    skipped=skipped,
+                    failed=failed,
+                    failed_by_code=failed_by_code,
+                    last_candidate_id=last_candidate_id,
+                    resume_after_candidate_id=cand.id,
+                    pause_reason="pacing_limit",
+                    next_eligible_at=next_eligible_at,
+                    remaining_candidates=remaining_candidates,
+                )
                 db.flush()
                 return run
 
@@ -530,7 +645,7 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
         except FloodWaitError as e:
             failed += 1
             code = "flood_wait"
-            failed_by_code[code] = failed_by_code.get(code, 0) + 1
+            _merge_failed_by_code(failed_by_code, code)
             db.add(
                 InviteAttempt(
                     workspace_id=workspace_id,
@@ -542,22 +657,28 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
                     attempted_at=utcnow(),
                 )
             )
+            fw = int(getattr(e, "seconds", 0) or 0)
+            next_eligible_at = utcnow() + timedelta(seconds=max(1, fw))
             run.status = "paused"
-            run.stats = {
-                "attempted": attempted,
-                "success": success,
-                "skipped": skipped,
-                "failed": failed,
-                "failed_by_code": failed_by_code,
-                "pause_reason": "flood_wait",
-                "flood_wait_seconds": int(getattr(e, "seconds", 0)),
-            }
+            run.stats = _invite_run_stats_payload(
+                attempted=attempted,
+                success=success,
+                skipped=skipped,
+                failed=failed,
+                failed_by_code=failed_by_code,
+                last_candidate_id=last_candidate_id,
+                resume_after_candidate_id=cand.id,
+                pause_reason="flood_wait",
+                next_eligible_at=next_eligible_at,
+                remaining_candidates=remaining_candidates,
+                flood_wait_seconds=fw,
+            )
             db.flush()
             return run
-        except Exception:
+        except Exception as e:
             failed += 1
-            code = "unknown"
-            failed_by_code[code] = failed_by_code.get(code, 0) + 1
+            code = _classify_invite_error(e)
+            _merge_failed_by_code(failed_by_code, code)
             db.add(
                 InviteAttempt(
                     workspace_id=workspace_id,
@@ -572,13 +693,15 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
 
     run.status = "succeeded"
     run.finished_at = utcnow()
-    run.stats = {
-        "attempted": attempted,
-        "success": success,
-        "skipped": skipped,
-        "failed": failed,
-        "failed_by_code": failed_by_code,
-    }
+    run.stats = _invite_run_stats_payload(
+        attempted=attempted,
+        success=success,
+        skipped=skipped,
+        failed=failed,
+        failed_by_code=failed_by_code,
+        last_candidate_id=last_candidate_id,
+        remaining_candidates=0,
+    )
     return run
 
 

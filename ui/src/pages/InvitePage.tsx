@@ -8,8 +8,66 @@ import { SkeletonBlock } from '../components/SkeletonBlock'
 import { EmptyState } from '../components/EmptyState'
 import { formatApiError } from '../lib/formatError'
 
+const POLICY_PRESET_KEY = 'pars.invite.policyPreset'
+
+export const INVITE_POLICY_PRESETS = {
+  cautious: { label: 'Осторожный', max_per_minute: 1, max_per_hour: 20, cooldown_minutes: 1440 },
+  standard: { label: 'Стандартный', max_per_minute: 2, max_per_hour: 30, cooldown_minutes: 0 },
+  aggressive: { label: 'Агрессивный', max_per_minute: 5, max_per_hour: 120, cooldown_minutes: 0 },
+} as const
+
+export type InvitePolicyPresetId = keyof typeof INVITE_POLICY_PRESETS
+
+function readStoredPreset(): InvitePolicyPresetId {
+  try {
+    const v = localStorage.getItem(POLICY_PRESET_KEY)
+    if (v === 'cautious' || v === 'standard' || v === 'aggressive') return v
+  } catch {
+    /* ignore */
+  }
+  return 'standard'
+}
+
 function runIsActive(r: InviteRun): boolean {
   return r.status === 'queued' || r.status === 'running'
+}
+
+function formatNextEligible(iso: string | undefined): string | null {
+  if (!iso) return null
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return null
+  const diff = t - Date.now()
+  if (diff <= 0) return 'можно продолжать'
+  const mins = Math.max(1, Math.ceil(diff / 60000))
+  return `~${mins} мин`
+}
+
+function pauseReasonHint(code: string | null): string | null {
+  if (!code) return null
+  switch (code) {
+    case 'pacing_limit':
+      return 'Достигнут лимит отправки. Дождитесь next_eligible_at или нажмите «Возобновить» позже.'
+    case 'flood_wait':
+      return 'Telegram вернул FloodWait. Подождите указанное время и возобновите запуск.'
+    case 'cancelled':
+      return 'Запуск отменён оператором.'
+    default:
+      return null
+  }
+}
+
+function errCodeBannerHint(code: string | null): string | null {
+  if (!code) return null
+  if (code === 'db_pool_timeout' || code === 'db_unavailable') {
+    return 'Проблема с пулом БД: уменьшите нагрузку или увеличьте пул на стороне сервера.'
+  }
+  if (code === 'invite_run_not_resumable') {
+    return 'Возобновить можно только запуск в статусе paused.'
+  }
+  if (code === 'invite_run_not_cancellable') {
+    return 'Отменить можно только queued или paused.'
+  }
+  return null
 }
 
 export function InvitePage() {
@@ -19,14 +77,25 @@ export function InvitePage() {
   const [targets, setTargets] = useState<Target[] | null>(null)
   const [runs, setRuns] = useState<InviteRun[] | null>(null)
   const [targetId, setTargetId] = useState<number | null>(null)
+  const [preset, setPreset] = useState<InvitePolicyPresetId>(() => readStoredPreset())
   const [focusedRun, setFocusedRun] = useState<InviteRun | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [errCode, setErrCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [actionBusyId, setActionBusyId] = useState<number | null>(null)
   const didInitTarget = useRef(false)
 
   const enabledTargets = useMemo(() => (targets ?? []).filter((t) => t.enabled), [targets])
   const canStart = targetId !== null
+
+  const onPresetChange = (id: InvitePolicyPresetId) => {
+    setPreset(id)
+    try {
+      localStorage.setItem(POLICY_PRESET_KEY, id)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const load = useCallback(async () => {
     setErr(null)
@@ -97,10 +166,11 @@ export function InvitePage() {
     setBusy(true)
     setErr(null)
     setErrCode(null)
+    const p = INVITE_POLICY_PRESETS[preset]
     try {
       await api.startInviteRun({
         target_id: targetId,
-        policy: { max_per_minute: 2, max_per_hour: 30, cooldown_minutes: 0 },
+        policy: { max_per_minute: p.max_per_minute, max_per_hour: p.max_per_hour, cooldown_minutes: p.cooldown_minutes },
       })
       await load()
     } catch (e) {
@@ -112,13 +182,47 @@ export function InvitePage() {
     }
   }
 
+  async function resumeRun(id: number) {
+    setActionBusyId(id)
+    setErr(null)
+    setErrCode(null)
+    try {
+      await api.resumeInviteRun(id)
+      await load()
+    } catch (e) {
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
+    } finally {
+      setActionBusyId(null)
+    }
+  }
+
+  async function cancelRun(id: number) {
+    setActionBusyId(id)
+    setErr(null)
+    setErrCode(null)
+    try {
+      await api.cancelInviteRun(id)
+      await load()
+    } catch (e) {
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
+    } finally {
+      setActionBusyId(null)
+    }
+  }
+
   const netHint = err && err.toLowerCase().includes('failed to fetch')
+  const bannerExtra = errCodeBannerHint(errCode)
 
   return (
     <PageLayout title="Инвайт" subtitle="Запуск приглашений и история с паузами (FloodWait, лимиты).">
       {err ? (
         <UiBanner variant="error" title={errCode ? `Ошибка (${errCode})` : undefined} onRetry={() => void load()}>
           {err}
+          {bannerExtra ? <div className="hint" style={{ marginTop: 8 }}>{bannerExtra}</div> : null}
           {netHint ? (
             <div className="hint" style={{ marginTop: 8 }}>
               Проверьте <code>VITE_API_BASE_URL</code> (сейчас: <code>{apiBaseUrl()}</code>) и CORS.
@@ -141,7 +245,9 @@ export function InvitePage() {
                         ? 'badge err'
                         : focusedRun.status === 'paused'
                           ? 'badge warn'
-                          : 'badge'
+                          : focusedRun.status === 'cancelled'
+                            ? 'badge'
+                            : 'badge'
                   }
                 >
                   {focusedRun.status}
@@ -155,6 +261,10 @@ export function InvitePage() {
                 const st = focusedRun.stats ?? {}
                 const pr = st.pause_reason ? String(st.pause_reason) : null
                 const fw = st.flood_wait_seconds != null ? String(st.flood_wait_seconds) : null
+                const nextIso = st.next_eligible_at != null ? String(st.next_eligible_at) : undefined
+                const nextHuman = formatNextEligible(nextIso)
+                const fbc = st.failed_by_code as Record<string, unknown> | undefined
+                const fbcEntries = fbc ? Object.entries(fbc).filter(([, v]) => Number(v) > 0) : []
                 return (
                   <>
                     {pr ? (
@@ -163,6 +273,55 @@ export function InvitePage() {
                         {fw ? ` · ${fw}s` : ''}
                       </div>
                     ) : null}
+                    {pauseReasonHint(pr) ? <div className="hint" style={{ marginTop: 8 }}>{pauseReasonHint(pr)}</div> : null}
+                    {nextIso ? (
+                      <div className="mono small" style={{ marginTop: 8 }}>
+                        next_eligible_at: {nextIso}
+                        {nextHuman ? ` (${nextHuman})` : ''}
+                      </div>
+                    ) : null}
+                    {st.remaining_candidates != null ? (
+                      <div className="mono small" style={{ marginTop: 4 }}>
+                        remaining_candidates: {String(st.remaining_candidates)}
+                      </div>
+                    ) : null}
+                    {fbcEntries.length > 0 ? (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="label">failed_by_code</div>
+                        <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                          {fbcEntries.map(([k, v]) => (
+                            <span key={k} className="badge">
+                              {k}: {String(v)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
+                      {focusedRun.status === 'paused' ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            disabled={actionBusyId === focusedRun.id}
+                            onClick={() => void resumeRun(focusedRun.id)}
+                          >
+                            {actionBusyId === focusedRun.id ? 'Возобновление…' : 'Возобновить'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={actionBusyId === focusedRun.id}
+                            onClick={() => void cancelRun(focusedRun.id)}
+                          >
+                            Отменить
+                          </button>
+                        </>
+                      ) : null}
+                      <Link to={`/attempts?invite_run_id=${focusedRun.id}`} className="btn">
+                        Попытки этого запуска
+                      </Link>
+                    </div>
                   </>
                 )
               })()}
@@ -185,7 +344,7 @@ export function InvitePage() {
         ) : enabledTargets.length === 0 ? (
           <EmptyState title="Нет активных целей" hint="Создайте и включите цель на странице «Цели»." />
         ) : (
-          <div className="row">
+          <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
             <label className="field grow">
               <div className="label">Цель</div>
               <select
@@ -200,13 +359,24 @@ export function InvitePage() {
                 ))}
               </select>
             </label>
+            <label className="field">
+              <div className="label">Политика</div>
+              <select value={preset} onChange={(e) => onPresetChange(e.target.value as InvitePolicyPresetId)} disabled={busy}>
+                {(Object.keys(INVITE_POLICY_PRESETS) as InvitePolicyPresetId[]).map((k) => (
+                  <option key={k} value={k}>
+                    {INVITE_POLICY_PRESETS[k].label} ({INVITE_POLICY_PRESETS[k].max_per_minute}/мин, {INVITE_POLICY_PRESETS[k].max_per_hour}/ч)
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" className="btn primary" onClick={() => void start()} disabled={busy || !canStart}>
               {busy ? 'Запуск…' : 'Запустить инвайт'}
             </button>
           </div>
         )}
         <div className="hint" style={{ marginTop: 10 }}>
-          Если статус <code>paused</code> — проверьте причину в таблице; при <code>flood_wait</code> подождите и запустите снова позже.
+          Если статус <code>paused</code> — смотрите <code>pause_reason</code> и <code>next_eligible_at</code>; при{' '}
+          <code>flood_wait</code> дождитесь таймера и нажмите «Возобновить».
         </div>
       </section>
 
@@ -222,9 +392,11 @@ export function InvitePage() {
               <tr>
                 <th>ID</th>
                 <th>Статус</th>
+                <th>Пауза / дальше</th>
                 <th>Цель</th>
                 <th>Старт</th>
                 <th>Итоги</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -232,6 +404,8 @@ export function InvitePage() {
                 const s = r.stats ?? {}
                 const pauseReason = s.pause_reason ? String(s.pause_reason) : null
                 const active = runIsActive(r)
+                const nextIso = s.next_eligible_at != null ? String(s.next_eligible_at) : null
+                const nextHuman = formatNextEligible(nextIso ?? undefined)
                 return (
                   <tr key={r.id} className={r.status === 'paused' ? 'warn' : ''}>
                     <td className="mono">
@@ -246,7 +420,9 @@ export function InvitePage() {
                               ? 'badge warn'
                               : r.status === 'failed'
                                 ? 'badge err'
-                                : 'badge'
+                                : r.status === 'cancelled'
+                                  ? 'badge'
+                                  : 'badge'
                         }
                       >
                         {r.status}
@@ -258,15 +434,59 @@ export function InvitePage() {
                         </span>
                       ) : null}
                     </td>
+                    <td className="mono small">
+                      {nextIso ? (
+                        <>
+                          {nextIso}
+                          {nextHuman ? <div className="muted">{nextHuman}</div> : null}
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td className="mono small">{r.target_id}</td>
                     <td className="mono small">{r.started_at}</td>
                     <td>
-                      <div className="row" style={{ alignItems: 'center' }}>
+                      <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                         <span className="badge">attempted {String(s.attempted ?? 0)}</span>
                         <span className="badge ok">success {String(s.success ?? 0)}</span>
                         <span className="badge">skipped {String(s.skipped ?? 0)}</span>
                         <span className="badge err">failed {String(s.failed ?? 0)}</span>
+                        {s.remaining_candidates != null ? (
+                          <span className="badge">осталось ~{String(s.remaining_candidates)}</span>
+                        ) : null}
                       </div>
+                    </td>
+                    <td>
+                      {r.status === 'paused' ? (
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            disabled={actionBusyId === r.id}
+                            onClick={() => void resumeRun(r.id)}
+                          >
+                            {actionBusyId === r.id ? '…' : 'Возобновить'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={actionBusyId === r.id}
+                            onClick={() => void cancelRun(r.id)}
+                          >
+                            Отменить
+                          </button>
+                        </div>
+                      ) : r.status === 'queued' ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={actionBusyId === r.id}
+                          onClick={() => void cancelRun(r.id)}
+                        >
+                          {actionBusyId === r.id ? '…' : 'Отменить'}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 )

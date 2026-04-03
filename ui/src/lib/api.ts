@@ -270,6 +270,10 @@ export const api = {
   getInviteRun: (id: number) => request<InviteRun>(`/invite-runs/${id}`),
   startInviteRun: (payload: { target_id: number; policy?: Record<string, unknown> }) =>
     request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
+  resumeInviteRun: (id: number) =>
+    request<InviteRun>(`/invite-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
+  cancelInviteRun: (id: number) =>
+    request<InviteRun>(`/invite-runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
 
   telegramRequestCode: (payload: { phone: string }) =>
     request<TelegramRequestCodeOut>('/telegram/auth/request_code', { method: 'POST', body: JSON.stringify(payload) }),

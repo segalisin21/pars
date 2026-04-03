@@ -1,10 +1,40 @@
 # QA Report — v1 Telegram Audience Collector & Inviter
 
-**Date:** 2026-04-02 (rev 2 — re-run after auth/CORS/pacing/FloodWait implementation)
-**Reviewer:** QA-Tester subagent
-**Scope:** Full v1 codebase re-review — new endpoints, auth middleware, CORS, pacing enforcement, FloodWait abort
+**Date:** 2026-04-03 (rev 4 — `/office` continue: run detail 404 + workspace tests)
+**Reviewer:** QA (office-parallel)
+**Scope:** Static review of `app/`, `tests/`, `ui/` contracts; regression coverage for GET run details
 **Test command:** `pytest tests/ -v --tb=short`
-**Result:** **7 passed, 0 failed** ✓ (now passes without manual PYTHONPATH)
+**Result:** **36 passed, 0 failed** ✓
+
+---
+
+## Full code review (2026-04-03) — `/office` (Dev / Design / QA / Security)
+
+| Area | Finding | Severity | Status |
+|------|---------|----------|--------|
+| DB sessions | `get_db` uses `yield from session_scope` — connections returned per request | — | OK (prior fix) |
+| Postgres pool | `create_postgres_engine` + env `SQLALCHEMY_POOL_*` on API | — | OK |
+| Worker | `NullPool` in worker — avoids competing with API for pool slots | — | OK |
+| `ADMIN_TOKEN` | Constant-time bearer check (`hmac.compare_digest`); startup warnings for prod-like env without token or short token | Low→Medium | **Fixed** |
+| Read endpoints unauthenticated | Documented risk for public ingress | Medium (ops) | Documented only |
+| UI | `InvitePage` / `CollectPage` polling; `AttemptsPage` `invite_run_id` query | — | OK |
+
+**New tests**
+
+- `tests/test_admin_auth.py` — `POST /sources` returns `401` when token required; `201` with valid `Authorization`.
+
+**Run detail coverage (2026-04-03)**
+
+- [`tests/test_run_detail.py`](../tests/test_run_detail.py): `404` for unknown ids; `404` when `X-Workspace-Id` does not own the run (collect + invite).
+- Bug file: [`docs/bugs/BUG-010.md`](bugs/BUG-010.md) (resolved).
+
+**Maintainability (2026-04-03, code review plan)**
+
+- HTTP routes split into [`app/routers/`](../app/routers/) (`APIRouter` per domain); [`requirements.txt`](../requirements.txt) pinned, [`requirements-dev.txt`](../requirements-dev.txt) for pytest.
+
+**Recommended follow-ups (backlog)**
+
+- If API is ever exposed publicly: gate reads or add API keys (see `docs/SECURITY.md`).
 
 ---
 
@@ -82,13 +112,13 @@
 | A-09 | `POST /collect-runs` with valid source_ids → 202, status=succeeded | **PASS** (tested) |
 | A-10 | `POST /collect-runs` with unknown source_id → 404 `source_not_found` | **PASS** (tested) |
 | A-11 | `POST /collect-runs` with empty source_ids → 422 validation error | **PASS** (Pydantic min_length=1) |
-| A-12 | `GET /collect-runs/{id}` returns run status | **PASS** (code path exists; **not covered by test**) |
+| A-12 | `GET /collect-runs/{id}` returns run status | **PASS** (tested: `test_run_detail.py` + happy path via collect flow) |
 | A-13 | `GET /collect-runs/{id}` with unknown id → 404 `collect_run_not_found` | **PASS** (code path exists) |
 | A-14 | `GET /collect-runs` list all runs (newest first) | **PASS** (implemented — untested) |
 | A-15 | `POST /invite-runs` with valid target_id → 202, status=succeeded | **PASS** (tested) |
 | A-16 | `POST /invite-runs` with unknown target_id → 404 `target_not_found` | **PASS** (tested) |
 | A-17 | `POST /invite-runs` with disabled target → 400 `validation_error` | **PASS** (code path exists) |
-| A-18 | `GET /invite-runs/{id}` returns run status | **PASS** (code path exists; **not covered by test**) |
+| A-18 | `GET /invite-runs/{id}` returns run status | **PASS** (tested: `test_run_detail.py` + invite flows) |
 | A-19 | `GET /invite-runs` list all runs (newest first) | **PASS** (implemented — untested) |
 | A-20 | Error responses use documented `{"error": {"code":…,"message":…,"details":…}}` envelope | **PASS** |
 | A-21 | Timestamps in responses include UTC timezone suffix `Z` | **PASS** |

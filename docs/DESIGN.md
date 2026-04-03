@@ -121,6 +121,22 @@ Statuses (suggested)
 4. On Telegram rate-limit (FloodWait), service applies backoff:
    - pause run or pause account for the wait duration
    - mark attempt as failed with `flood_wait`
+5. **`InviteRun` lifecycle (v1.5)** — states and transitions:
+
+```text
+queued ──worker/API──► running ──► succeeded | failed
+              │                    │
+              │                    ├──► paused (pacing_limit | flood_wait)
+              │                    │         │
+              │                    │         ├── resume ──► queued (re-enqueue or sync)
+              │                    │         └── cancel ──► cancelled
+              │                    │
+              └──► cancelled (operator cancel from queued)
+```
+
+- **Paused / pacing**: `stats.next_eligible_at` estimates when the next invite fits the per-minute/hour policy; operator can resume after that time or immediately (next attempt will pause again if still over limit).
+- **Paused / FloodWait**: `stats.next_eligible_at` and `flood_wait_seconds` reflect Telegram’s wait; **Resume** retries the same candidate id stored in `resume_after_candidate_id`.
+- **Counters** (`attempted`, `success`, `failed`, `failed_by_code`) accumulate across resume cycles for the same `InviteRun` id.
 
 ## Eligibility rules (v1)
 
@@ -190,7 +206,7 @@ A thin, separately-deployed web UI gives the operator visibility and control wit
 | `/invite` | Start an InviteRun, view run history and per-attempt status |
 | `/invite/:runId` | Optional deep link: focus one invite run |
 | `/candidates` | Read-only candidate table with counts and eligibility indicators |
-| `/attempts` | Filterable invite attempts |
+| `/attempts` | Filterable invite attempts; optional `?invite_run_id=` deep link from an invite run |
 | `/suppression` | Suppression list |
 | `/audit` | Audit events |
 | `/telegram-auth` | Request code / verify to obtain session string (worker env) |
@@ -223,7 +239,7 @@ A thin, separately-deployed web UI gives the operator visibility and control wit
 | Sources | text «Загрузка» | copy + CTA | `Banner` + retry | Skeleton optional (v1.1) |
 | Targets | same | same | same | — |
 | Collect | same | «нет запусков» | same | Polling while any run `queued`/`running`; deep link `/collect/:id` |
-| Invite | same | same | same | Polling; `/invite/:id`; show `paused` + `pause_reason` |
+| Invite | same | same | same | Polling while `queued`/`running`; `/invite/:id` shows `paused`, `pause_reason`, `next_eligible_at`, `failed_by_code`, **Resume** / **Cancel**; policy presets (local) |
 | Candidates | same | empty copy | same | Filters + pagination; mask `tg_user_id` in list |
 | Attempts / Suppression / Audit | same | empty | same | Filters |
 
@@ -381,6 +397,21 @@ The system is composed of four runtime services plus one managed backing service
 - Whether `ui` is a SPA (React/Vite) or server-rendered (Jinja2 via `api`) — defer until frontend tech is confirmed.
 - Redis persistence mode — ephemeral fine for v1; revisit if job durability is required.
 - Railway private networking vs. public URLs with token auth for internal service communication — prefer private networking.
+
+---
+
+## Backend structure (FastAPI)
+
+- HTTP routes are grouped under [`app/routers/`](../app/routers/) (per-domain `APIRouter` factories); [`app/main.py`](../app/main.py) wires middleware, exception handlers, `create_app`, and mounts routers via `register_routes`. Business logic stays in [`app/services.py`](../app/services.py) where possible.
+
+---
+
+## Code review & release alignment (operator tool)
+
+- **Roles:** Dev (code + `docs/REPORT.md`), Design (this file), QA (`docs/QA_REPORT.md`), Security (`docs/SECURITY.md`); all append **`coordination/HANDOFF.md`** for traceability.
+- **Gate:** `pytest tests/ -v --tb=short` must pass before merge/deploy.
+- **Auth UX:** when `ADMIN_TOKEN` is configured on the API, the UI should set `VITE_ADMIN_TOKEN` to the same value or writes fail with `401` — see operator deployment notes in `docs/RAILWAY.md`.
+- **Deep links:** `/collect/:id` and `/invite/:id` rely on `GET` run detail; wrong id or wrong workspace should surface as not found — covered by `tests/test_run_detail.py`.
 
 ---
 

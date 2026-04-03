@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { InviteAttempt, PageMeta } from '../lib/api'
 import { DataTable } from '../components/DataTable'
@@ -8,22 +9,24 @@ import { SkeletonBlock } from '../components/SkeletonBlock'
 import { formatApiError } from '../lib/formatError'
 
 export function AttemptsPage() {
+  const [searchParams] = useSearchParams()
   const [items, setItems] = useState<InviteAttempt[] | null>(null)
   const [page, setPage] = useState<PageMeta | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [errCode, setErrCode] = useState<string | null>(null)
 
-  const [inviteRunId, setInviteRunId] = useState('')
+  const [inviteRunId, setInviteRunId] = useState(() => searchParams.get('invite_run_id') ?? '')
   const [candidateId, setCandidateId] = useState('')
   const [errorCode, setErrorCode] = useState('')
 
-  async function load(next?: { offset?: number }) {
+  async function load(next?: { offset?: number; inviteRunId?: string }) {
     setErr(null)
     setErrCode(null)
     const offset = next?.offset ?? page?.offset ?? 0
+    const ir = (next?.inviteRunId ?? inviteRunId).trim()
     try {
       const res = await api.listInviteAttempts({
-        invite_run_id: inviteRunId.trim() ? Number(inviteRunId) : undefined,
+        invite_run_id: ir ? Number(ir) : undefined,
         candidate_id: candidateId.trim() ? Number(candidateId) : undefined,
         error_code: errorCode.trim() || undefined,
         limit: 50,
@@ -41,9 +44,11 @@ export function AttemptsPage() {
   }
 
   useEffect(() => {
-    void load({ offset: 0 })
+    const fromUrl = searchParams.get('invite_run_id') ?? ''
+    setInviteRunId(fromUrl)
+    void load({ offset: 0, inviteRunId: fromUrl })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [searchParams])
 
   const rows = items ?? []
   const columns = [

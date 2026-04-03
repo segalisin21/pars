@@ -112,7 +112,7 @@ Railway runs a **fresh build** for each service (`api`, `worker`, `ui`). The fir
 
 - Pin Node for the UI via `ui/package.json` `engines` and `ui/.nvmrc` (helps consistent, cache-friendly installs).
 - Keep `ui` **Build command**: `npm run build`; **Start**: `npm run preview -- --host 0.0.0.0 --port $PORT` (as above).
-- For `api` / `worker`, keep **Root directory** at repo root; avoid unnecessary file churn in `requirements.txt` to improve pip cache hits.
+- For `api` / `worker`, keep **Root directory** at repo root; install **`requirements.txt`** only in production (pinned). Use **`requirements-dev.txt`** locally when running tests (`pytest`).
 
 ## Common deploy errors
 
@@ -180,6 +180,12 @@ If collect runs against large groups/channels, fetching participants can take mi
 
 - `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (or `3600`)
 - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
+
+### Invite tuning (single Telegram account)
+
+- **Defaults in API/UI:** `max_per_minute: 2`, `max_per_hour: 30` are a reasonable starting point for one user session; raise slowly and watch `paused` + `pause_reason=pacing_limit` and FloodWait rates.
+- **UI presets:** «Осторожный» / «Стандартный» / «Агрессивный» map to different `max_per_minute` / `max_per_hour` / `cooldown_minutes`; prefer lower rates if you see frequent `flood_wait` pauses.
+- **DB pressure:** if the API returns `db_pool_timeout`, reduce concurrent work (fewer parallel jobs, lower invite rates) or increase the SQLAlchemy pool on the **API** service — see `docs/REPORT.md` for 503 codes.
 
 ## 4) Verify
 

@@ -56,6 +56,16 @@ All non-2xx responses use:
 - `db_unavailable` — driver/DB error (e.g. connection dropped); same envelope as above.
 - `db_pool_timeout` — SQLAlchemy connection pool exhausted; retry after a short backoff.
 
+### Database sessions and commits (implementation note)
+
+- Each HTTP request uses a SQLAlchemy `Session` from the `get_db` dependency (`yield` from [`session_scope`](app/db.py)); after the handler returns, the dependency **commits** on success or **rolls back** on exception, then **closes** the session.
+- Handlers often call **`db.commit()`** explicitly (e.g. after creating a row so `id` is available for a follow-up `AuditEvent`, or before enqueueing RQ work). A final commit at the end of the request scope is then typically a no-op on a clean session. This pattern is **intentional** for multi-step writes; new endpoints should follow existing routes in [`app/routers/`](app/routers/) rather than mixing ad-hoc session lifecycle.
+
+### Python dependencies (install)
+
+- **Production / worker:** `pip install -r requirements.txt` (pinned versions).
+- **Tests / local dev:** `pip install -r requirements-dev.txt` (includes `requirements.txt` + `pytest`).
+
 ## Schemas (v1)
 
 ### Source
@@ -159,16 +169,30 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
     "failed": 3,
     "failed_by_code": {
       "flood_wait": 1,
-      "privacy_restricted": 2
-    }
+      "privacy_restricted": 2,
+      "unknown": 0
+    },
+    "remaining_candidates": 120,
+    "last_candidate_id": 5001,
+    "resume_after_candidate_id": 5001,
+    "next_eligible_at": "2026-04-02T10:03:00+00:00"
   }
 }
 ```
 
 `status` values: `queued` | `running` | `succeeded` | `failed` | `cancelled` | `paused`
 
+**`stats` (invite v1.5):**
+
+- `attempted`, `success`, `skipped`, `failed` — cumulative counters across pauses/resumes (merged when a paused run is resumed).
+- `failed_by_code`: map of `error_code` → count (includes `flood_wait`, `missing_tg_user_id`, `privacy_restricted`, `already_member`, `unknown`, etc.).
+- `remaining_candidates` — rough count of candidates still to scan in the current ordered pass (from resume cursor to end of list).
+- `last_candidate_id` — last candidate id that advanced the attempt counter in this run (progress hint).
+- `resume_after_candidate_id` — when pausing for pacing or FloodWait, the candidate id to retry first after **Resume** (same user is attempted again).
+
 When `status="paused"`, `stats` may include:
-- `pause_reason`: `"pacing_limit"` | `"flood_wait"`
+- `pause_reason`: `"pacing_limit"` | `"flood_wait"` | `"cancelled"` (after operator cancel)
+- `next_eligible_at`: ISO timestamp — earliest safe time to continue after pacing pause, or after FloodWait (aligned with Telegram wait seconds).
 - `flood_wait_seconds`: integer (only when `pause_reason="flood_wait"`)
 
 ## Endpoints (v1)
@@ -317,6 +341,32 @@ Errors:
 #### `GET /invite-runs`
 List invite runs (newest first).
 
+#### `POST /invite-runs/{id}/resume`
+Resume a **paused** invite run (sets `status` to `queued` and enqueues the worker when `REDIS_URL` is set; otherwise runs `process_invite_run` synchronously in the API process).
+
+Requires auth.
+
+Response `202`: InviteRun (same shape as `POST /invite-runs`).
+
+Errors:
+- `400` `invite_run_not_resumable` — run is not `paused`
+- `404` `invite_run_not_found`
+
+Audit: `invite.resume`
+
+#### `POST /invite-runs/{id}/cancel`
+Cancel a **queued** or **paused** run (`status` → `cancelled`, `finished_at` set). Does not stop a run that is already `running` (use pauses / worker completion instead).
+
+Requires auth.
+
+Response `200`: InviteRun
+
+Errors:
+- `400` `invite_run_not_cancellable` — run is not `queued` or `paused`
+- `404` `invite_run_not_found`
+
+Audit: `invite.cancel`
+
 ### Telegram auth (v1)
 
 > Purpose: obtain a `TG_SESSION_STRING` (Telethon StringSession) for Railway deployments without terminal login.
@@ -371,6 +421,26 @@ If account has 2FA enabled, response error may be `"NEEDS_PASSWORD"`.
 - `already_member`
 - `banned_or_kicked`
 - `unknown`
+
+---
+
+## Code review snapshot (2026-04-03) — `/office` security & auth
+
+**Scope:** Follow-up to pool/session fixes; admin bearer verification and regression tests.
+
+**Changes**
+
+- `verify_admin_token` compares `Authorization` to `Bearer <ADMIN_TOKEN>` using `hmac.compare_digest` (after length check).
+- `FastAPI` **lifespan** startup: warns if `ADMIN_TOKEN` is missing in production-like environments (`postgres` `DATABASE_URL` or `RAILWAY_ENVIRONMENT`), or if token length is below 32 characters.
+- Tests: [`tests/test_admin_auth.py`](tests/test_admin_auth.py).
+
+**Verification**
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+**Run detail regression (2026-04-03):** `GET /collect-runs/{id}` and `GET /invite-runs/{id}` — see [`tests/test_run_detail.py`](../tests/test_run_detail.py) (404 unknown id; 404 wrong `X-Workspace-Id`).
 
 ---
 

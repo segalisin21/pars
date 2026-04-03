@@ -36,6 +36,16 @@ pytest tests/ -v --tb=short
 
 ## Test setup
 
+### Python environment
+
+Install pinned dependencies before running pytest:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+(`requirements-dev.txt` includes production deps plus `pytest`.)
+
 ### Database
 
 - Use **in-memory SQLite** for tests.

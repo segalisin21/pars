@@ -719,3 +719,100 @@ cd ui && npm run lint && npm run build
 - Tune pool envs vs Postgres `max_connections` when scaling `api` replicas.
 
 - Pushed: `git push origin master:test`.
+
+
+## 2026-04-03 (feat: invite system v1.5 — stats, resume/cancel, UI)
+
+### What changed
+
+- **`process_invite_run`:** cumulative stats across resumes; `remaining_candidates`, `last_candidate_id`, `resume_after_candidate_id`, `next_eligible_at` on pacing/FloodWait pauses; Telethon/RPC errors mapped to stable `error_code` values where possible.
+- **API:** `POST /invite-runs/{id}/resume`, `POST /invite-runs/{id}/cancel` (audit: `invite.resume`, `invite.cancel`).
+- **UI:** Invite page — policy presets + `localStorage`, pause/next_eligible/failed_by_code, Resume/Cancel; Attempts — `?invite_run_id=` prefill; `api.resumeInviteRun` / `api.cancelInviteRun`.
+- **Docs:** `docs/REPORT.md`, `docs/DESIGN.md`, `docs/RAILWAY.md`.
+- **Tests:** `tests/test_invite_lifecycle.py`.
+
+### Key files
+
+- `app/services.py`, `app/main.py`
+- `ui/src/pages/InvitePage.tsx`, `ui/src/pages/AttemptsPage.tsx`, `ui/src/lib/api.ts`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- **Cancel** only for `queued` or `paused` (not `running`); race if worker picks `queued` immediately before cancel.
+
+
+## 2026-04-03 (`/office` — full code review package + auth hardening)
+
+### What changed (Dev)
+
+- **`verify_admin_token`:** bearer comparison via `hmac.compare_digest` on UTF-8 bytes (after length match).
+- **Lifespan startup:** warnings when `ADMIN_TOKEN` unset in prod-like env (`postgres` DB URL or `RAILWAY_ENVIRONMENT`), or when token is shorter than 32 chars.
+- **Tests:** [`tests/test_admin_auth.py`](tests/test_admin_auth.py) — 401 vs 201 for `POST /sources`.
+
+### Docs (Design / QA / Security / REPORT)
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — section «Code review & release alignment».
+- [`docs/QA_REPORT.md`](docs/QA_REPORT.md) — rev 3, 2026-04-03 office review table + test count.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — remaining gaps updated to reflect mitigations.
+- [`docs/REPORT.md`](docs/REPORT.md) — code review snapshot 2026-04-03.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Unauthenticated read endpoints remain a deployment concern for public networks; see `docs/SECURITY.md`.
+
+
+## 2026-04-03 (`/office` continue — run detail regression tests)
+
+### What changed (Dev)
+
+- [`tests/test_run_detail.py`](tests/test_run_detail.py): `GET /collect-runs/{id}` and `GET /invite-runs/{id}` return `404` for unknown ids and when `X-Workspace-Id` does not match the run’s workspace.
+
+### QA / Security / Design / REPORT
+
+- [`docs/QA_REPORT.md`](docs/QA_REPORT.md) — rev 4; checklist A-12 / A-18 marked tested.
+- [`docs/bugs/BUG-010.md`](docs/bugs/BUG-010.md) — resolved (coverage gap).
+- [`docs/SECURITY.md`](docs/SECURITY.md) — note on workspace-scoped GET detail tests.
+- [`docs/DESIGN.md`](docs/DESIGN.md) — deep link note tied to tests.
+- [`docs/REPORT.md`](docs/REPORT.md) — pointer to `test_run_detail.py`.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- None beyond existing public-read endpoint posture; see `docs/SECURITY.md`.
+
+
+## 2026-04-03 (implement: code review plan — pins, tx docs, routers)
+
+### What changed
+
+- **Dependencies:** [`requirements.txt`](requirements.txt) pinned (FastAPI, SQLAlchemy, Telethon, RQ, etc.); [`requirements-dev.txt`](requirements-dev.txt) includes `-r requirements.txt` + `pytest`. Removed unused direct `httpx` pin (Starlette/FastAPI stack provides it for `TestClient`).
+- **Docs:** [`docs/REPORT.md`](docs/REPORT.md) — «Database sessions and commits» + install commands; [`.cursor/rules/code-style.mdc`](.cursor/rules/code-style.mdc) — note on mid-request `commit`; [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md), [`docs/RAILWAY.md`](docs/RAILWAY.md), [`docs/DESIGN.md`](docs/DESIGN.md) updated.
+- **Routers:** All HTTP routes moved from monolithic [`app/main.py`](app/main.py) to [`app/routers/*.py`](app/routers/) with [`RouteContext`](app/routers/context.py); `main` registers via [`register_routes`](app/routers/__init__.py).
+
+### How to verify
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- CI must install `requirements-dev.txt` (or equivalent) to run tests.

@@ -39,7 +39,7 @@ Implementation checklist:
 - [x] Store `ADMIN_TOKEN` in an environment variable; never hard-code it.
 - [x] Add a FastAPI dependency (`verify_admin_token`) that reads and verifies the header. Returns `401` with `{"error":{"code":"unauthorized","message":"Missing or invalid token","details":{}}}` on failure.
 - [x] Read-only endpoints (`GET /health`, `GET /sources`, `GET /targets`, `GET /collect-runs`, `GET /invite-runs`, detail endpoints) remain unauthenticated in v1. **Must** be gated if the API is publicly reachable in a future version.
-- [ ] Token must be ≥ 32 characters, generated via `secrets.token_urlsafe(32)` or equivalent — *no runtime length check exists yet*.
+- [ ] Token must be ≥ 32 characters, generated via `secrets.token_urlsafe(32)` or equivalent — *runtime enforcement is a **startup warning** if shorter; not a hard fail (avoids breaking short test tokens)*.
 - [x] No tokens appear in logs.
 
 > **Current status (v1):** Authentication is implemented via `verify_admin_token` dependency on all write/mutating endpoints. `GET /health` remains unauthenticated for health checks.
@@ -48,12 +48,14 @@ Implementation checklist:
 
 Data is partitioned by integer workspace id. The header defaults to `1` when omitted (local/tests). **Do not treat the workspace id as a secret:** it is not a substitute for `ADMIN_TOKEN` on mutating routes. If read endpoints remain unauthenticated in a public deployment, any client that can guess or enumerate workspace ids could read that tenant’s data — gate reads or network access accordingly.
 
+> **Regression tests (2026-04-03):** `GET /collect-runs/{id}` and `GET /invite-runs/{id}` return `404` when the run belongs to another workspace (`tests/test_run_detail.py`), matching the scoping rule used for lists.
+
 > **Remaining gaps (auth):**
 >
-> 1. **Silent skip when `ADMIN_TOKEN` is unset** — if the env var is missing, the dependency returns immediately (local-dev convenience). This is dangerous in production: an accidental deployment without the variable leaves all write endpoints open. Mitigation: log a warning at startup or refuse to start when `ADMIN_TOKEN` is absent and `DEBUG`/`ENV` is not `"local"`.
-> 2. **No minimum-length enforcement** — the security policy requires ≥ 32 chars, but the app does not validate token length at startup.
-> 3. **Non-constant-time comparison** — `auth != expected` uses Python's default string `!=`, which is vulnerable to timing side-channels. Low practical risk for a single-operator tool, but `hmac.compare_digest` would close the gap.
-> 4. **No test coverage** — tests create the app without setting `ADMIN_TOKEN`, so the auth code path (401 rejection) is never exercised. Add tests that set the env var and verify 401/200 behavior.
+> 1. **Silent skip when `ADMIN_TOKEN` is unset** — if the env var is missing, the dependency returns immediately (local-dev convenience). **Mitigation (2026-04-03):** at application startup, log a **warning** when `ADMIN_TOKEN` is absent and the deployment looks production-like (`DATABASE_URL` starts with `postgres`, or `RAILWAY_ENVIRONMENT` is set). Does not refuse to boot (Railway health checks / migration workflows).
+> 2. **Minimum-length policy** — if `ADMIN_TOKEN` is set but shorter than 32 characters, a **startup warning** is logged. Hard failure is not enforced by default.
+> 3. **Constant-time comparison** — **done (2026-04-03):** `Authorization` header is compared to `Bearer <ADMIN_TOKEN>` using `hmac.compare_digest` on equal-length UTF-8 bytestrings; length mismatch yields 401 without calling `compare_digest`.
+> 4. **Test coverage** — **done (2026-04-03):** `tests/test_admin_auth.py` exercises 401 (missing/wrong bearer) and 201 with valid token when `ADMIN_TOKEN` is set.
 
 ### Secrets handling
 
