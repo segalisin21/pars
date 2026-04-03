@@ -5,11 +5,11 @@ import os
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError, TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
 
-from app.db import Base, create_session_factory, create_sqlite_engine
+from app.db import Base, create_postgres_engine, create_session_factory, create_sqlite_engine
 from app.dependencies import get_db as make_get_db, get_tg_client as make_get_tg, get_workspace_id
 from app.models import (
     AuditEvent,
@@ -119,15 +119,23 @@ def create_app(
             content={"error": {"code": "db_unavailable", "message": "Database is temporarily unavailable", "details": {}}},
         )
 
+    @app.exception_handler(SATimeoutError)
+    async def pool_timeout_handler(_request: Request, _exc: SATimeoutError):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "db_pool_timeout",
+                    "message": "Database connection pool is busy; try again shortly",
+                    "details": {},
+                }
+            },
+        )
+
     if session_factory is None:
         db_url = os.getenv("DATABASE_URL")
         if db_url:
-            engine = create_engine(
-                db_url,
-                future=True,
-                pool_pre_ping=True,
-                pool_recycle=300,
-            )
+            engine = create_postgres_engine(db_url)
         else:
             engine = create_sqlite_engine("sqlite:///./app.db")
         Base.metadata.create_all(engine)

@@ -51,6 +51,11 @@ All non-2xx responses use:
 - `message`: human-readable short summary
 - `details`: optional structured fields (safe, no secrets)
 
+**Occasional 503 responses** (transient DB stress):
+
+- `db_unavailable` — driver/DB error (e.g. connection dropped); same envelope as above.
+- `db_pool_timeout` — SQLAlchemy connection pool exhausted; retry after a short backoff.
+
 ## Schemas (v1)
 
 ### Source

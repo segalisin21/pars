@@ -82,8 +82,28 @@ export function CollectPage() {
 
   useEffect(() => {
     if (!needsPoll && !focusNeedsPoll) return
-    const t = window.setInterval(() => void load(), 3000)
-    return () => window.clearInterval(t)
+    let cancelled = false
+    let timeoutId: number
+    const schedule = () => {
+      const delayMs = document.hidden ? 15000 : 5000
+      timeoutId = window.setTimeout(async () => {
+        if (cancelled) return
+        await load()
+        if (!cancelled) schedule()
+      }, delayMs)
+    }
+    const onVisibility = () => {
+      window.clearTimeout(timeoutId)
+      if (!document.hidden) void load()
+      schedule()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    schedule()
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearTimeout(timeoutId)
+    }
   }, [needsPoll, focusNeedsPoll, load])
 
   function toggle(id: number) {

@@ -5,6 +5,7 @@ import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.db import Base
 from app.models import CollectRun, InviteRun, Source
@@ -23,11 +24,12 @@ def _get_session_factory() -> sessionmaker[Session]:
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL is required for worker jobs")
+    # NullPool: one connection per checkout, no long-lived pool competing with the API service.
     engine = create_engine(
         db_url,
         future=True,
+        poolclass=NullPool,
         pool_pre_ping=True,
-        pool_recycle=300,
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)

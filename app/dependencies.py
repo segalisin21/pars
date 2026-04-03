@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Annotated
 
 from fastapi import Header
@@ -17,8 +18,8 @@ def get_workspace_id(
 
 
 def get_db(session_factory: sessionmaker[Session]):
-    def _get_db() -> Session:
-        return next(session_scope(session_factory))
+    def _get_db() -> Generator[Session, None, None]:
+        yield from session_scope(session_factory)
 
     return _get_db
 

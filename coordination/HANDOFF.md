@@ -694,3 +694,28 @@ cd ui && npm run lint && npm run build
 - Existing SQLite file DBs need `ALTER TABLE sources ADD COLUMN collect_mode ...` or recreate; Postgres needs the new migration script once.
 
 - Pushed: `git push origin master:test`.
+
+
+## 2026-04-03 (fix: DB session lifecycle + pool tuning + UI poll)
+
+### What changed
+
+- **`get_db`:** `yield from session_scope(...)` so FastAPI closes SQLAlchemy sessions after each request (fixes connection churn / pool exhaustion under load).
+- **`create_postgres_engine`:** env `SQLALCHEMY_POOL_SIZE`, `SQLALCHEMY_MAX_OVERFLOW`, `SQLALCHEMY_POOL_TIMEOUT` (defaults 10 / 20 / 60s).
+- **Worker:** `NullPool` for Postgres (no idle pool competing with API).
+- **API:** `503` + `db_pool_timeout` on `sqlalchemy.exc.TimeoutError`.
+- **UI:** Collect/Invite active-run polling 5s (15s when tab hidden) + refresh on `visibilitychange`.
+- **Docs:** `docs/REPORT.md`, `docs/RAILWAY.md`.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+cd ui && npm run lint && npm run build
+```
+
+### Risks / known limitations
+
+- Tune pool envs vs Postgres `max_connections` when scaling `api` replicas.
+
+- Pushed: `git push origin master:test`.

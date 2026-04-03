@@ -44,6 +44,7 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
   - `REDIS_URL` = (from Railway Redis)
   - `ADMIN_TOKEN` = (generate strong token)
   - `CORS_ALLOWED_ORIGINS` = (your `ui` public URL, e.g. `https://<ui>.up.railway.app`)
+  - **SQLAlchemy pool (Postgres only, optional):** `SQLALCHEMY_POOL_SIZE` (default `10`), `SQLALCHEMY_MAX_OVERFLOW` (default `20`), `SQLALCHEMY_POOL_TIMEOUT` seconds (default `60`). Tune if you see `db_pool_timeout` / pool exhaustion; ensure **sum of pools across all `api` replicas + worker** stays below your Postgres `max_connections`.
 
 > Note: on startup the API will automatically create DB tables (v1) if they don't exist yet.
 
@@ -72,6 +73,8 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `COLLECT_MESSAGE_SCAN_LIMIT` = `5000` (max messages to walk per source when message collection runs; increase with care — more FloodWait risk)
 
 > Note: on startup the worker will automatically create DB tables (v1) if they don't exist yet.
+
+> The worker uses **NullPool** (no connection pool cache) so it does not hold many idle DB connections alongside the API service.
 
 > Important: `worker` must not be public.
 
