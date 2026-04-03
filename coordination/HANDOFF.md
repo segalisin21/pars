@@ -866,3 +866,8 @@ pytest tests/ -v --tb=short
 ### Risks / known limitations
 
 - **Existing Postgres** volumes that relied on Alembic revisions: use manual SQL migrations under `scripts/` (workspace, `source_ids`, etc.) as before; `create_all` does not alter existing tables for new columns.
+
+## 2026-04-03 (git: push to `test` — revert + RAILWAY docs)
+
+- **Commits:** `811b642` (revert Alembic on startup), `d1fef60` (`docs(railway): Postgres auth checklist; handoff revert Alembic note`)
+- **Remote:** `git push origin master:test` → `https://github.com/segalisin21/pars.git` branch `test` updated.
