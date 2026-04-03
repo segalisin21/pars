@@ -116,6 +116,26 @@ Railway runs a **fresh build** for each service (`api`, `worker`, `ui`). The fir
 
 ## Common deploy errors
 
+### Postgres: `FATAL: password authentication failed for user "postgres"`
+
+You reached the database host (`*.railway.internal`), but **the password in the connection string does not match** what the running Postgres instance expects.
+
+This often happens **right after deleting or recreating** the Postgres service: Railway generates a **new** `DATABASE_URL`, while `api` / `worker` still use an **old** value (or a stale reference).
+
+**Fix (checklist)**
+
+1. **Open the Postgres service → Variables** in Railway and confirm the current `DATABASE_URL` (or `POSTGRES_PASSWORD` / connection vars). After recreate, these are new.
+2. **On `api` and `worker`**, set `DATABASE_URL` to the **current** value:
+   - Preferred: **Variable reference** from the Postgres service, e.g. `${{Postgres.DATABASE_URL}}`, where `Postgres` is the **exact** service name on the canvas (case-sensitive).
+   - Or paste the full URL from Postgres Variables once, then save.
+3. **Remove duplicates and stale copies**
+   - Delete any **second** `DATABASE_URL` defined at **project** vs **service** level if both exist and disagree (Railway merges variables; the wrong one can win depending on scope).
+   - Remove manual **`PGPASSWORD`**, **`POSTGRES_PASSWORD`**, **`POSTGRES_USER`** from `api` / `worker` unless you truly need them. This app uses **`DATABASE_URL` only**; extra libpq-related vars can confuse debugging and sometimes desync from the URL.
+4. **Save variables**, then **Redeploy** `api` and `worker` (or restart). A new deploy is required so containers pick up the new env.
+5. If it **still** fails after a clean recreate, try once more: Postgres **Settings** → rotate / reset password per Railway docs, then update the reference on `api` / `worker` and redeploy.
+
+**Not the fix:** disabling Alembic or migrations. Any first DB connection (migrations, `create_all`, default workspace seed, routes) would fail the same way until `DATABASE_URL` is correct.
+
 ### UI builds as Python and fails with `npm: not found`
 
 This happens when the `ui` service is not configured with **Root directory = `ui`**.

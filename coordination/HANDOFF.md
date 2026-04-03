@@ -842,3 +842,27 @@ pytest tests/ -v --tb=short
 
 - **Commit:** `7a3bb58` — `feat(api): invite v1.5 stats, resume/cancel, APIRouter split, pinned deps, admin auth tests`
 - **Remote:** `git push origin master:test` → `https://github.com/segalisin21/pars.git` branch `test` updated.
+
+## 2026-04-03 (revert: Alembic on startup)
+
+### What changed
+
+- **Reverted** `7e74f48` (`feat(db): Alembic migrations on API/worker startup`) via commit `811b642`.
+- API/worker again use **`Base.metadata.create_all`** at startup (no Alembic package, no `app/migration.py`, no `tests/test_migrations.py`).
+- **Railway:** if the service still fails with `password authentication failed for user "postgres"`, that is **`DATABASE_URL` / env mismatch**, not fixed by this revert — startup still opens a DB connection for `create_all` and `_ensure_default_workspace`.
+- **Docs:** [`docs/RAILWAY.md`](docs/RAILWAY.md) — subsection **Postgres: password authentication failed** (checklist after DB recreate / stale `DATABASE_URL`).
+
+### Key files
+
+- [`app/main.py`](app/main.py) — `create_all` path restored.
+- [`app/worker_jobs.py`](app/worker_jobs.py) — worker DB init aligned with revert.
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- **Existing Postgres** volumes that relied on Alembic revisions: use manual SQL migrations under `scripts/` (workspace, `source_ids`, etc.) as before; `create_all` does not alter existing tables for new columns.
