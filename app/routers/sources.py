@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import SourceCreate, SourceOut, SourcePatch, SourcesList
 from app.services import refresh_source_telegram_meta
+from app.telegram_accounts_service import resolve_telegram_client_for_run
 from app.telegram_client import TelegramClient
 from app.worker_jobs import execute_refresh_source_meta
 
@@ -94,6 +95,7 @@ def make_sources_router(ctx: RouteContext) -> APIRouter:
     @router.post("/sources/{source_id}/refresh_telegram_meta")
     def refresh_source_telegram_meta_route(
         source_id: int,
+        telegram_account_id: int | None = Query(default=None),
         db: Session = Depends(get_db),
         tg: TelegramClient = Depends(get_tg),
         workspace_id: int = Depends(get_workspace_id),
@@ -110,13 +112,18 @@ def make_sources_router(ctx: RouteContext) -> APIRouter:
             q.enqueue(
                 execute_refresh_source_meta,
                 source_id=source_id,
+                telegram_account_id=telegram_account_id,
                 job_timeout=120,
             )
             return JSONResponse(
                 status_code=202,
                 content=source_row_out(src).model_dump(mode="json"),
             )
-        refresh_source_telegram_meta(db, workspace_id, source_id, tg)
+        if telegram_account_id is not None:
+            tg_use, _acc = resolve_telegram_client_for_run(db, preferred_account_id=telegram_account_id)
+        else:
+            tg_use = tg
+        refresh_source_telegram_meta(db, workspace_id, source_id, tg_use)
         db.commit()
         db.refresh(src)
         db.add(

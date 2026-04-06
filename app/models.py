@@ -98,6 +98,26 @@ class CandidateSourceLink(Base):
     __table_args__ = (UniqueConstraint("workspace_id", "candidate_id", "source_id", name="uq_candidate_source_workspace"),)
 
 
+class TelegramAccount(Base):
+    """Global pool of Telegram user sessions (not workspace-scoped)."""
+
+    __tablename__ = "telegram_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    session_string_encrypted: Mapped[str] = mapped_column(String(8192), nullable=False)
+    session_string_key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When set, this account should not be auto-selected until this time (e.g. after FloodWait).
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SuppressionList(Base):
     __tablename__ = "suppression_list"
 
@@ -120,11 +140,15 @@ class CollectRun(Base):
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     source_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    telegram_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("telegram_accounts.id"), nullable=True, index=True
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stats: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     workspace: Mapped[Workspace] = relationship()
+    telegram_account: Mapped["TelegramAccount | None"] = relationship()
 
 
 class InviteRun(Base):
@@ -133,6 +157,9 @@ class InviteRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    telegram_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("telegram_accounts.id"), nullable=True, index=True
+    )
     target_id: Mapped[int] = mapped_column(ForeignKey("invite_targets.id"), nullable=False, index=True)
     # Empty list = all candidates in workspace; otherwise only candidates linked to these sources.
     source_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
@@ -143,6 +170,7 @@ class InviteRun(Base):
 
     target: Mapped[InviteTarget] = relationship()
     workspace: Mapped[Workspace] = relationship()
+    telegram_account: Mapped["TelegramAccount | None"] = relationship()
 
 
 class InviteAttempt(Base):

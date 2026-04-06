@@ -48,7 +48,7 @@ function pauseReasonHint(code: string | null): string | null {
     case 'pacing_limit':
       return 'Достигнут лимит отправки. Дождитесь next_eligible_at или нажмите «Возобновить» позже.'
     case 'flood_wait':
-      return 'Telegram вернул FloodWait. Подождите указанное время и возобновите запуск.'
+      return 'Telegram вернул FloodWait. Запуск возобновится автоматически после next_eligible_at (см. cron invite_scheduler на сервере) или нажмите «Возобновить».'
     case 'cancelled':
       return 'Запуск отменён оператором.'
     default:
@@ -86,6 +86,8 @@ export function InvitePage() {
   const [busy, setBusy] = useState(false)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
   const didInitTarget = useRef(false)
+  const [tgAccounts, setTgAccounts] = useState<{ id: number; label: string }[] | null>(null)
+  const [accountChoice, setAccountChoice] = useState<string>('')
 
   const enabledTargets = useMemo(() => (targets ?? []).filter((t) => t.enabled), [targets])
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
@@ -146,6 +148,13 @@ export function InvitePage() {
     void load()
   }, [load])
 
+  useEffect(() => {
+    void api
+      .listTelegramAccounts()
+      .then((r) => setTgAccounts(r.items.filter((x) => x.enabled).map((x) => ({ id: x.id, label: x.label }))))
+      .catch(() => setTgAccounts([]))
+  }, [])
+
   const needsPoll = useMemo(() => (runs ?? []).some(runIsActive), [runs])
   const focusNeedsPoll = useMemo(() => (focusedRun ? runIsActive(focusedRun) : false), [focusedRun])
 
@@ -184,11 +193,21 @@ export function InvitePage() {
     try {
       const source_ids =
         inviteSourceIds.size === 0 ? [] : [...inviteSourceIds].sort((a, b) => a - b)
-      await api.startInviteRun({
+      const invitePayload: {
+        target_id: number
+        policy: { max_per_minute: number; max_per_hour: number; cooldown_minutes: number }
+        source_ids: number[]
+        telegram_account_id?: number
+      } = {
         target_id: targetId,
         policy: { max_per_minute: p.max_per_minute, max_per_hour: p.max_per_hour, cooldown_minutes: p.cooldown_minutes },
         source_ids,
-      })
+      }
+      if (accountChoice !== '') {
+        const n = Number(accountChoice)
+        if (!Number.isNaN(n)) invitePayload.telegram_account_id = n
+      }
+      await api.startInviteRun(invitePayload)
       await load()
     } catch (e) {
       const f = formatApiError(e)
@@ -393,6 +412,19 @@ export function InvitePage() {
                   ))}
                 </select>
               </label>
+              {tgAccounts && tgAccounts.length > 0 ? (
+                <label className="field">
+                  <div className="label">Telegram аккаунт</div>
+                  <select value={accountChoice} onChange={(e) => setAccountChoice(e.target.value)} disabled={busy}>
+                    <option value="">Авто</option>
+                    {tgAccounts.map((a) => (
+                      <option key={a.id} value={String(a.id)}>
+                        {a.label || `#${a.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <button type="button" className="btn primary" onClick={() => void start()} disabled={busy || !canStart}>
                 {busy ? 'Запуск…' : 'Запустить инвайт'}
               </button>
@@ -428,8 +460,9 @@ export function InvitePage() {
           </>
         )}
         <div className="hint" style={{ marginTop: 10 }}>
-          Если статус <code>paused</code> — смотрите <code>pause_reason</code> и <code>next_eligible_at</code>; при{' '}
-          <code>flood_wait</code> дождитесь таймера и нажмите «Возобновить».
+          Если статус <code>paused</code> — смотрите <code>pause_reason</code> и <code>next_eligible_at</code>. После наступления
+          времени запуск обычно ставится в очередь автоматически (планировщик <code>python -m app.invite_scheduler</code> на
+          сервере с <code>REDIS_URL</code>), либо нажмите «Возобновить» вручную.
         </div>
       </section>
 

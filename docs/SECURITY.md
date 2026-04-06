@@ -28,7 +28,7 @@
 
 #### Admin token (mandatory before go-live)
 
-All mutating endpoints (`POST /sources`, `POST /targets`, `POST /collect-runs`, `POST /invite-runs`, `PATCH /sources/{id}`, `PATCH /targets/{id}`) require a bearer token:
+All mutating endpoints (`POST /sources`, `POST /targets`, `POST /collect-runs`, `POST /invite-runs`, `PATCH /sources/{id}`, `PATCH /targets/{id}`, `POST /telegram-accounts`, `PATCH /telegram-accounts/{id}`, `DELETE /telegram-accounts/{id}`, `POST /telegram-accounts/{id}/test`) require a bearer token:
 
 ```
 Authorization: Bearer <ADMIN_TOKEN>
@@ -65,6 +65,10 @@ Data is partitioned by integer workspace id. The header defaults to `1` when omi
   - API id/hash values
 - Store secrets only in environment variables / local secret store.
 - Ensure any exception output does not include secrets.
+
+#### Telegram accounts in database (encrypted)
+
+When using `POST /telegram-accounts`, session strings are encrypted at rest with **`APP_ENCRYPTION_KEY`** (Fernet key, URL-safe base64). Generate once: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Set the same key on **api** and **worker** (and any process that decrypts sessions). API responses never return raw session strings.
 
 ### PII minimization
 

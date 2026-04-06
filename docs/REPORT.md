@@ -94,6 +94,8 @@ All non-2xx responses use:
 
 Requires `Authorization: Bearer` when `ADMIN_TOKEN` is set.
 
+Optional query: `?telegram_account_id=<id>` — use a specific global Telegram account (DB) for Telethon; omit for auto-selection / env session.
+
 - **Synchronous** (no `REDIS_URL`): resolves entity via the API process’s Telegram client (noop in default API deploy → fields stay unchanged).
 - **Asynchronous** (`REDIS_URL` set): returns **202** with the current `Source` JSON; the **worker** updates metadata after Telethon resolves the entity.
 
@@ -117,6 +119,7 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
   "id": 10,
   "status": "running",
   "source_ids": [1, 2],
+  "telegram_account_id": null,
   "started_at": "2026-04-02T10:00:00Z",
   "finished_at": null,
   "stats": {
@@ -156,6 +159,7 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
   "status": "running",
   "target_id": 1,
   "source_ids": [],
+  "telegram_account_id": null,
   "policy": {
     "max_per_minute": 2,
     "max_per_hour": 30,
@@ -288,15 +292,19 @@ Request:
 
 ```json
 {
-  "source_ids": [1, 2]
+  "source_ids": [1, 2],
+  "telegram_account_id": null
 }
 ```
 
-Response `202`: CollectRun
+Optional `telegram_account_id`: global Telegram account row (see **Telegram accounts**). Omit or `null` for **auto** selection among enabled accounts, or fall back to `TG_SESSION_STRING` on the worker when no DB accounts exist.
+
+Response `202`: CollectRun (includes `telegram_account_id` when set).
 
 Errors:
 - `400` `validation_error`
 - `404` `source_not_found`
+- `404` `telegram_account_not_found`
 
 #### `GET /collect-runs/{id}`
 Get run status.
@@ -324,18 +332,22 @@ Request:
     "max_per_hour": 30,
     "cooldown_minutes": 1440
   },
-  "source_ids": []
+  "source_ids": [],
+  "telegram_account_id": null
 }
 ```
 
 `source_ids` optional; defaults to `[]` (all workspace candidates). Duplicate ids are deduplicated server-side. Each id must exist in the current workspace or the API returns `404` `source_not_found`.
 
-Response `202`: InviteRun
+Optional `telegram_account_id`: global Telegram account; omit/`null` for auto-selection (same rules as collect runs).
+
+Response `202`: InviteRun (includes `telegram_account_id` when set).
 
 Errors:
 - `400` `validation_error`
 - `404` `target_not_found`
 - `404` `source_not_found`
+- `404` `telegram_account_not_found`
 
 #### `GET /invite-runs/{id}`
 Get run status.
@@ -373,6 +385,25 @@ Errors:
 - `404` `invite_run_not_found`
 
 Audit: `invite.cancel`
+
+### Telegram accounts (global pool)
+
+> **Security:** all endpoints require `ADMIN_TOKEN`. Session strings are stored **encrypted at rest** using `APP_ENCRYPTION_KEY` (Fernet). Never log session contents.
+
+#### `GET /telegram-accounts`
+List global Telegram accounts (no secrets returned).
+
+#### `POST /telegram-accounts`
+Create account. Body: `{ "label": "optional", "session_string": "<Telethon StringSession>" }`.
+
+#### `PATCH /telegram-accounts/{id}`
+Update `label` and/or `enabled`.
+
+#### `DELETE /telegram-accounts/{id}`
+Delete account row.
+
+#### `POST /telegram-accounts/{id}/test`
+Connects with Telethon and returns `{ "ok": bool, "username": string | null, "error": string | null }`.
 
 ### Telegram auth (v1)
 

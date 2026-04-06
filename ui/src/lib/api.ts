@@ -31,6 +31,7 @@ export type CollectRun = {
   id: number
   status: string
   source_ids: number[]
+  telegram_account_id?: number | null
   started_at: string
   finished_at: string | null
   stats: Record<string, unknown>
@@ -42,10 +43,23 @@ export type InviteRun = {
   target_id: number
   /** Empty = all workspace candidates; otherwise only candidates linked to these sources. */
   source_ids?: number[]
+  telegram_account_id?: number | null
   policy: Record<string, unknown>
   started_at: string
   finished_at: string | null
   stats: Record<string, unknown>
+}
+
+export type TelegramAccount = {
+  id: number
+  label: string
+  enabled: boolean
+  created_at: string
+  last_used_at: string | null
+  last_ok_at: string | null
+  last_error_code: string | null
+  last_error_at: string | null
+  cooldown_until: string | null
 }
 
 export type TelegramRequestCodeOut = {
@@ -236,8 +250,11 @@ export const api = {
     invalidateSourcesListCache()
     return r
   },
-  refreshSourceTelegramMeta: async (id: number) => {
-    const url = `${getBaseUrl()}/sources/${id}/refresh_telegram_meta`
+  refreshSourceTelegramMeta: async (id: number, telegram_account_id?: number | null) => {
+    const sp = new URLSearchParams()
+    if (telegram_account_id != null) sp.set('telegram_account_id', String(telegram_account_id))
+    const qs = sp.toString()
+    const url = `${getBaseUrl()}/sources/${id}/refresh_telegram_meta${qs ? `?${qs}` : ''}`
     const headers = new Headers()
     headers.set('Content-Type', 'application/json')
     const token = getAdminToken()
@@ -265,7 +282,7 @@ export const api = {
 
   listCollectRuns: () => request<{ items: CollectRun[] }>('/collect-runs'),
   getCollectRun: (id: number) => request<CollectRun>(`/collect-runs/${id}`),
-  startCollectRun: (payload: { source_ids: number[] }) =>
+  startCollectRun: (payload: { source_ids: number[]; telegram_account_id?: number | null }) =>
     request<CollectRun>('/collect-runs', { method: 'POST', body: JSON.stringify(payload) }),
 
   listInviteRuns: () => request<{ items: InviteRun[] }>('/invite-runs'),
@@ -274,7 +291,20 @@ export const api = {
     target_id: number
     policy?: Record<string, unknown>
     source_ids?: number[]
+    telegram_account_id?: number | null
   }) => request<InviteRun>('/invite-runs', { method: 'POST', body: JSON.stringify(payload) }),
+
+  listTelegramAccounts: () => request<{ items: TelegramAccount[] }>('/telegram-accounts'),
+  createTelegramAccount: (payload: { label?: string; session_string: string }) =>
+    request<TelegramAccount>('/telegram-accounts', { method: 'POST', body: JSON.stringify(payload) }),
+  patchTelegramAccount: (id: number, payload: { label?: string; enabled?: boolean }) =>
+    request<TelegramAccount>(`/telegram-accounts/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteTelegramAccount: (id: number) => request<void>(`/telegram-accounts/${id}`, { method: 'DELETE' }),
+  testTelegramAccount: (id: number) =>
+    request<{ ok: boolean; username: string | null; error: string | null }>(`/telegram-accounts/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   resumeInviteRun: (id: number) =>
     request<InviteRun>(`/invite-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
   cancelInviteRun: (id: number) =>

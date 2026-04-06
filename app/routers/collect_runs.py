@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, CollectRun, Source
+from app.models import AuditEvent, CollectRun, Source, TelegramAccount
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import CollectRunCreate, CollectRunOut, CollectRunsList
@@ -37,11 +37,26 @@ def make_collect_runs_router(ctx: RouteContext) -> APIRouter:
                     detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": sid}}},
                 )
 
+        if payload.telegram_account_id is not None:
+            acc = db.get(TelegramAccount, payload.telegram_account_id)
+            if acc is None or not acc.enabled:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": {
+                            "code": "telegram_account_not_found",
+                            "message": "Telegram account not found or disabled",
+                            "details": {"id": payload.telegram_account_id},
+                        }
+                    },
+                )
+
         if is_queue_enabled():
             run = CollectRun(
                 workspace_id=workspace_id,
                 status="queued",
                 source_ids=payload.source_ids,
+                telegram_account_id=payload.telegram_account_id,
                 stats={},
             )
             db.add(run)
@@ -67,13 +82,20 @@ def make_collect_runs_router(ctx: RouteContext) -> APIRouter:
                 id=run.id,
                 status=run.status,
                 source_ids=run.source_ids,
+                telegram_account_id=getattr(run, "telegram_account_id", None),
                 started_at=run.started_at,
                 finished_at=run.finished_at,
                 stats=run.stats,
             )
 
         try:
-            run = run_collect(db, tg, payload.source_ids, workspace_id)
+            run = run_collect(
+                db,
+                tg,
+                payload.source_ids,
+                workspace_id,
+                telegram_account_id=payload.telegram_account_id,
+            )
             db.commit()
             db.refresh(run)
         except KeyError as e:
@@ -87,6 +109,7 @@ def make_collect_runs_router(ctx: RouteContext) -> APIRouter:
             id=run.id,
             status=run.status,
             source_ids=run.source_ids,
+            telegram_account_id=getattr(run, "telegram_account_id", None),
             started_at=run.started_at,
             finished_at=run.finished_at,
             stats=run.stats,
@@ -103,6 +126,7 @@ def make_collect_runs_router(ctx: RouteContext) -> APIRouter:
                     id=r.id,
                     status=r.status,
                     source_ids=r.source_ids,
+                    telegram_account_id=getattr(r, "telegram_account_id", None),
                     started_at=r.started_at,
                     finished_at=r.finished_at,
                     stats=r.stats,
@@ -123,6 +147,7 @@ def make_collect_runs_router(ctx: RouteContext) -> APIRouter:
             id=run.id,
             status=run.status,
             source_ids=run.source_ids,
+            telegram_account_id=getattr(run, "telegram_account_id", None),
             started_at=run.started_at,
             finished_at=run.finished_at,
             stats=run.stats,

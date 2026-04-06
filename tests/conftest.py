@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +13,13 @@ from app.db import Base, create_session_factory
 from app.main import create_app
 from app.models import Workspace
 from app.telegram_client import FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
+
+
+@pytest.fixture(autouse=True)
+def _app_encryption_key_autouse():
+    if not os.environ.get("APP_ENCRYPTION_KEY"):
+        os.environ["APP_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+    yield
 
 
 class FakeTelegramClient(TelegramClient):

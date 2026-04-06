@@ -53,6 +53,30 @@ class TelethonTelegramClient(TelegramClient):
         session_string = _get_session_string()
         return cls(TelethonConfig(api_id=api_id, api_hash=api_hash, session_string=session_string))
 
+    def verify_session(self) -> tuple[bool, str | None, str | None]:
+        """Connect, call get_me(), disconnect. Returns (ok, username_or_none, error_message_or_none)."""
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+        except Exception as e:  # pragma: no cover
+            return False, None, str(e)
+
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            if not client.is_user_authorized():
+                return False, None, "not_authorized"
+            me = client.get_me()
+            un = getattr(me, "username", None) or None
+            return True, un, None
+        except Exception as e:
+            return False, None, type(e).__name__
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         try:
             from telethon.sync import TelegramClient as _TelethonClient  # type: ignore

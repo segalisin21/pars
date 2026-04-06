@@ -10,6 +10,7 @@ from sqlalchemy.pool import NullPool
 from app.db import Base
 from app.models import CollectRun, InviteRun, Source
 from app.services import process_collect_run, process_invite_run, refresh_source_telegram_meta
+from app.telegram_accounts_service import prepare_telegram_client_for_worker_run
 from app.telegram_client import TelegramClient
 from app.telethon_client import TelethonTelegramClient
 
@@ -20,7 +21,7 @@ def _tg_client_mode(tg: TelegramClient) -> str:
     return "telethon" if isinstance(tg, TelethonTelegramClient) else "noop"
 
 
-def _get_session_factory() -> sessionmaker[Session]:
+def get_worker_session_factory() -> sessionmaker[Session]:
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL is required for worker jobs")
@@ -35,35 +36,8 @@ def _get_session_factory() -> sessionmaker[Session]:
     return sessionmaker(bind=engine, class_=Session, expire_on_commit=False, autoflush=False)
 
 
-def _get_tg_client() -> TelegramClient:
-    # In Railway worker we expect a real Telegram session.
-    # If env vars are missing, fall back to a noop client to keep jobs from crashing,
-    # but collection will return 0 participants.
-    try:
-        return TelethonTelegramClient.from_env()
-    except Exception:
-        class _NoopTelegramClient(TelegramClient):
-            def iter_participants(self, source_identifier: str):
-                return iter(())
-
-            def get_participants(self, source_identifier: str):
-                return []
-
-            def iter_users_from_messages(self, source_identifier: str, *, limit=None, min_date=None):
-                return iter(())
-
-            def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
-                return None
-
-            def fetch_source_meta(self, source_identifier: str):
-                return None
-
-        return _NoopTelegramClient()
-
-
 def execute_collect_run(*, run_id: int) -> None:
-    session_factory = _get_session_factory()
-    tg = _get_tg_client()
+    session_factory = get_worker_session_factory()
     db = session_factory()
     try:
         run = db.get(CollectRun, run_id)
@@ -71,6 +45,15 @@ def execute_collect_run(*, run_id: int) -> None:
             return
         if run.status not in {"queued"}:
             return
+        try:
+            tg, _acc = prepare_telegram_client_for_worker_run(db, run, None)
+        except Exception as e:
+            logger.exception("collect_run telegram client failed run_id=%s", run_id)
+            run.status = "failed"
+            run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
+            db.commit()
+            return
+
         run.status = "running"
         db.flush()
 
@@ -99,8 +82,7 @@ def execute_collect_run(*, run_id: int) -> None:
 
 
 def execute_invite_run(*, run_id: int) -> None:
-    session_factory = _get_session_factory()
-    tg = _get_tg_client()
+    session_factory = get_worker_session_factory()
     db = session_factory()
     try:
         run = db.get(InviteRun, run_id)
@@ -108,6 +90,15 @@ def execute_invite_run(*, run_id: int) -> None:
             return
         if run.status not in {"queued"}:
             return
+        try:
+            tg, _acc = prepare_telegram_client_for_worker_run(db, run, None)
+        except Exception as e:
+            logger.exception("invite_run telegram client failed run_id=%s", run_id)
+            run.status = "failed"
+            run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
+            db.commit()
+            return
+
         run.status = "running"
         db.flush()
 
@@ -127,20 +118,28 @@ def execute_invite_run(*, run_id: int) -> None:
                 run.target_id,
                 _tg_client_mode(tg),
             )
-            raise
         finally:
             db.commit()
     finally:
         db.close()
 
 
-def execute_refresh_source_meta(*, source_id: int) -> None:
-    session_factory = _get_session_factory()
-    tg = _get_tg_client()
+def execute_refresh_source_meta(*, source_id: int, telegram_account_id: int | None = None) -> None:
+    session_factory = get_worker_session_factory()
     db = session_factory()
     try:
         src = db.get(Source, source_id)
         if src is None:
+            return
+        class _Run:
+            pass
+
+        _r = _Run()
+        _r.telegram_account_id = telegram_account_id
+        try:
+            tg, _acc = prepare_telegram_client_for_worker_run(db, _r, telegram_account_id)
+        except Exception:
+            logger.exception("refresh_source_meta telegram client failed source_id=%s", source_id)
             return
         refresh_source_telegram_meta(db, src.workspace_id, source_id, tg)
         db.commit()

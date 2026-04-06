@@ -9,3 +9,4 @@ psycopg2-binary==2.9.11
 redis==7.4.0
 rq==2.7.0
 telethon==1.42.0
+cryptography==46.0.3

@@ -43,6 +43,7 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
   - `DATABASE_URL` = (from Railway Postgres)
   - `REDIS_URL` = (from Railway Redis)
   - `ADMIN_TOKEN` = (generate strong token)
+  - `APP_ENCRYPTION_KEY` = (Fernet key; required if you store Telegram accounts via `POST /telegram-accounts` — must match worker)
   - `CORS_ALLOWED_ORIGINS` = (your `ui` public URL, e.g. `https://<ui>.up.railway.app`)
   - **SQLAlchemy pool (Postgres only, optional):** `SQLALCHEMY_POOL_SIZE` (default `10`), `SQLALCHEMY_MAX_OVERFLOW` (default `20`), `SQLALCHEMY_POOL_TIMEOUT` seconds (default `60`). Tune if you see `db_pool_timeout` / pool exhaustion; ensure **sum of pools across all `api` replicas + worker** stays below your Postgres `max_connections`.
 
@@ -64,7 +65,8 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `REDIS_URL` = (from Railway Redis)
   - `TG_API_ID` = your Telegram API ID
   - `TG_API_HASH` = your Telegram API HASH
-  - `TG_SESSION_STRING` = your Telegram session string (worker-only secret)
+  - `TG_SESSION_STRING` = your Telegram session string (worker-only secret; **optional** if you use DB Telegram accounts and auto-selection)
+  - `APP_ENCRYPTION_KEY` = same Fernet key as `api` (required to decrypt stored session strings)
   - `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (recommended for large groups; default may be too small)
   - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
   - `COLLECT_BATCH_SIZE` = `300` (how often we commit progress during collect)
@@ -77,6 +79,16 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
 > The worker uses **NullPool** (no connection pool cache) so it does not hold many idle DB connections alongside the API service.
 
 > Important: `worker` must not be public.
+
+### Invite auto-resume (paused runs)
+
+When an invite run pauses for **pacing** or **FloodWait**, `stats.next_eligible_at` stores when it may continue. To **automatically** set `status` back to `queued` and enqueue the worker (without manual **Resume**), run the scheduler on a cron (e.g. every minute) with the same env as `worker`:
+
+```bash
+python -m app.invite_scheduler
+```
+
+Requires `REDIS_URL`, `DATABASE_URL`, and (if using encrypted DB accounts) `APP_ENCRYPTION_KEY`. Add a small Railway **Cron** or duplicate service with this start command.
 
 ### Service: `ui`
 

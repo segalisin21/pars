@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, InviteRun, InviteTarget, Source, utcnow
+from app.models import AuditEvent, InviteRun, InviteTarget, Source, TelegramAccount, utcnow
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import InviteRunCreate, InviteRunOut, InviteRunsList
@@ -21,6 +21,7 @@ def _invite_run_out(run: InviteRun) -> InviteRunOut:
         status=run.status,
         target_id=run.target_id,
         source_ids=source_ids,
+        telegram_account_id=getattr(run, "telegram_account_id", None),
         policy=run.policy,
         started_at=run.started_at,
         finished_at=run.finished_at,
@@ -64,11 +65,26 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                     detail={"error": {"code": "source_not_found", "message": "Source not found", "details": {"id": sid}}},
                 )
 
+        if payload.telegram_account_id is not None:
+            acc = db.get(TelegramAccount, payload.telegram_account_id)
+            if acc is None or not acc.enabled:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": {
+                            "code": "telegram_account_not_found",
+                            "message": "Telegram account not found or disabled",
+                            "details": {"id": payload.telegram_account_id},
+                        }
+                    },
+                )
+
         if is_queue_enabled():
             run = InviteRun(
                 workspace_id=workspace_id,
                 status="queued",
                 target_id=payload.target_id,
+                telegram_account_id=payload.telegram_account_id,
                 source_ids=payload.source_ids,
                 policy=payload.policy.model_dump(),
                 stats={},
@@ -102,6 +118,7 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
                 payload.policy.model_dump(),
                 workspace_id,
                 source_ids=payload.source_ids,
+                telegram_account_id=payload.telegram_account_id,
             )
             db.commit()
             db.refresh(run)

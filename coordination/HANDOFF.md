@@ -871,3 +871,34 @@ pytest tests/ -v --tb=short
 
 - **Commits:** `811b642` (revert Alembic on startup), `d1fef60` (`docs(railway): Postgres auth checklist; handoff revert Alembic note`)
 - **Remote:** `git push origin master:test` → `https://github.com/segalisin21/pars.git` branch `test` updated.
+
+## 2026-04-06 (feat: multi Telegram accounts + invite auto-resume)
+
+### What changed
+
+- **Global Telegram accounts** (`telegram_accounts` table): encrypted `session_string` via `APP_ENCRYPTION_KEY` (Fernet); API CRUD + `POST /telegram-accounts/{id}/test` (admin-only).
+- **`telegram_account_id`** on `collect_runs` and `invite_runs` (optional); worker selects account (LRU / cooldown) or uses `TG_SESSION_STRING` when no DB accounts.
+- **Worker** (`app/worker_jobs.py`): `prepare_telegram_client_for_worker_run`; `execute_refresh_source_meta` accepts optional `telegram_account_id` (query on `POST /sources/{id}/refresh_telegram_meta`).
+- **FloodWait** on invite: updates account `cooldown_until` via `mark_account_cooldown`.
+- **Invite auto-resume:** `python -m app.invite_scheduler` (`tick_invite_resume`) re-queues paused runs when `next_eligible_at` has passed and `pause_reason` is `pacing_limit` or `flood_wait`.
+- **UI:** menu «Telegram аккаунты», optional account on Collect/Invite start.
+- **Docs:** `docs/REPORT.md`, `docs/RAILWAY.md`, `docs/SECURITY.md`; Postgres migration `scripts/migrate_telegram_accounts_pg.sql`.
+
+### Key files
+
+- [`app/models.py`](app/models.py), [`app/crypto.py`](app/crypto.py), [`app/telegram_accounts_service.py`](app/telegram_accounts_service.py)
+- [`app/routers/telegram_accounts.py`](app/routers/telegram_accounts.py), [`app/invite_scheduler.py`](app/invite_scheduler.py)
+- [`app/worker_jobs.py`](app/worker_jobs.py), [`app/services.py`](app/services.py), [`app/telethon_client.py`](app/telethon_client.py)
+- [`ui/src/pages/TelegramAccountsPage.tsx`](ui/src/pages/TelegramAccountsPage.tsx), [`ui/src/lib/api.ts`](ui/src/lib/api.ts)
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- **Existing Postgres:** run `scripts/migrate_telegram_accounts_pg.sql` once (or `create_all` on fresh DB).
+- **Scheduler:** must be deployed separately (cron) for auto-resume; requires `REDIS_URL` + same DB secrets as worker.
+- **Encryption key** must be identical on api and worker; loss of key = sessions cannot be decrypted.

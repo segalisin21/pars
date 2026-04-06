@@ -21,6 +21,7 @@ from app.models import (
     SuppressionList,
     utcnow,
 )
+from app.telegram_accounts_service import mark_account_cooldown
 from app.telegram_client import FloodWaitError, TelegramClient, TgUser
 
 logger = logging.getLogger(__name__)
@@ -412,11 +413,19 @@ def refresh_source_telegram_meta(
     return src
 
 
-def run_collect(db: Session, tg_client: TelegramClient, source_ids: list[int], workspace_id: int) -> CollectRun:
+def run_collect(
+    db: Session,
+    tg_client: TelegramClient,
+    source_ids: list[int],
+    workspace_id: int,
+    *,
+    telegram_account_id: int | None = None,
+) -> CollectRun:
     run = CollectRun(
         workspace_id=workspace_id,
         status="running",
         source_ids=source_ids,
+        telegram_account_id=telegram_account_id,
         started_at=utcnow(),
         stats={},
     )
@@ -774,12 +783,14 @@ def run_invite(
     workspace_id: int,
     *,
     source_ids: list[int] | None = None,
+    telegram_account_id: int | None = None,
 ) -> InviteRun:
     ids = list(source_ids) if source_ids is not None else []
     run = InviteRun(
         workspace_id=workspace_id,
         status="running",
         target_id=target_id,
+        telegram_account_id=telegram_account_id,
         source_ids=ids,
         policy=policy,
         started_at=utcnow(),

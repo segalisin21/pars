@@ -39,6 +39,8 @@ export function CollectPage() {
   const [errCode, setErrCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const didInitSelection = useRef(false)
+  const [tgAccounts, setTgAccounts] = useState<{ id: number; label: string }[] | null>(null)
+  const [accountChoice, setAccountChoice] = useState<string>('')
 
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
   const canStart = enabledSources.length > 0 && selectedIds.size > 0
@@ -76,6 +78,13 @@ export function CollectPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void api
+      .listTelegramAccounts()
+      .then((r) => setTgAccounts(r.items.filter((x) => x.enabled).map((x) => ({ id: x.id, label: x.label }))))
+      .catch(() => setTgAccounts([]))
+  }, [])
 
   const needsPoll = useMemo(() => (runs ?? []).some(runIsActive), [runs])
   const focusNeedsPoll = useMemo(() => (focusedRun ? runIsActive(focusedRun) : false), [focusedRun])
@@ -120,7 +129,14 @@ export function CollectPage() {
     setErr(null)
     setErrCode(null)
     try {
-      await api.startCollectRun({ source_ids: Array.from(selectedIds) })
+      const payload: { source_ids: number[]; telegram_account_id?: number } = {
+        source_ids: Array.from(selectedIds),
+      }
+      if (accountChoice !== '') {
+        const n = Number(accountChoice)
+        if (!Number.isNaN(n)) payload.telegram_account_id = n
+      }
+      await api.startCollectRun(payload)
       await load()
     } catch (e) {
       const f = formatApiError(e)
@@ -242,6 +258,20 @@ export function CollectPage() {
                 </button>
               ))}
             </div>
+            {tgAccounts && tgAccounts.length > 0 ? (
+              <label className="row" style={{ marginTop: 12, alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span>Telegram аккаунт</span>
+                <select value={accountChoice} onChange={(e) => setAccountChoice(e.target.value)} disabled={busy}>
+                  <option value="">Авто</option>
+                  {tgAccounts.map((a) => (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.label || `#${a.id}`}
+                    </option>
+                  ))}
+                </select>
+                <span className="hint">Пусто = авто среди включённых или env-сессия на worker.</span>
+              </label>
+            ) : null}
             <div className="row" style={{ justifyContent: 'flex-end' }}>
               <button type="button" className="btn primary" onClick={() => void start()} disabled={busy || !canStart}>
                 {busy ? 'Запуск…' : 'Запустить сбор'}

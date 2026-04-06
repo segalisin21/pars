@@ -97,12 +97,15 @@ class TargetPatch(BaseModel):
 
 class CollectRunCreate(BaseModel):
     source_ids: list[int] = Field(min_length=1)
+    # Optional global Telegram account; omit for auto-selection among enabled accounts / env session.
+    telegram_account_id: int | None = None
 
 
 class CollectRunOut(BaseModel):
     id: int
     status: str
     source_ids: list[int]
+    telegram_account_id: int | None = None
     started_at: datetime
     finished_at: datetime | None
     stats: dict[str, Any]
@@ -127,6 +130,7 @@ class InviteRunCreate(BaseModel):
     policy: InvitePolicy = Field(default_factory=InvitePolicy)
     # Empty = invite from all candidates in workspace; otherwise only candidates collected from these sources.
     source_ids: list[int] = Field(default_factory=list, max_length=50)
+    telegram_account_id: int | None = None
 
     @field_validator("source_ids", mode="after")
     @classmethod
@@ -139,6 +143,7 @@ class InviteRunOut(BaseModel):
     status: str
     target_id: int
     source_ids: list[int]
+    telegram_account_id: int | None = None
     policy: dict[str, Any]
     started_at: datetime
     finished_at: datetime | None
@@ -172,6 +177,42 @@ class TelegramVerifyCodeOut(BaseModel):
     success: bool
     session_string: str | None
     error: str | None
+
+
+class TelegramAccountCreate(BaseModel):
+    label: str = Field(default="", max_length=128)
+    session_string: str = Field(min_length=1, max_length=8192)
+
+
+class TelegramAccountPatch(BaseModel):
+    label: str | None = Field(default=None, max_length=128)
+    enabled: bool | None = None
+
+
+class TelegramAccountOut(BaseModel):
+    id: int
+    label: str
+    enabled: bool
+    created_at: datetime
+    last_used_at: datetime | None
+    last_ok_at: datetime | None
+    last_error_code: str | None
+    last_error_at: datetime | None
+    cooldown_until: datetime | None
+
+    @field_serializer("created_at", "last_used_at", "last_ok_at", "last_error_at", "cooldown_until")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TelegramAccountsList(BaseModel):
+    items: list[TelegramAccountOut]
+
+
+class TelegramAccountTestOut(BaseModel):
+    ok: bool
+    username: str | None = None
+    error: str | None = None
 
 
 class PageMeta(BaseModel):

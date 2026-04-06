@@ -15,6 +15,9 @@ const AttemptsPage = lazy(() => import('./pages/AttemptsPage').then((m) => ({ de
 const SuppressionPage = lazy(() => import('./pages/SuppressionPage').then((m) => ({ default: m.SuppressionPage })))
 const AuditPage = lazy(() => import('./pages/AuditPage').then((m) => ({ default: m.AuditPage })))
 const TelegramAuthPage = lazy(() => import('./pages/TelegramAuthPage').then((m) => ({ default: m.TelegramAuthPage })))
+const TelegramAccountsPage = lazy(() =>
+  import('./pages/TelegramAccountsPage').then((m) => ({ default: m.TelegramAccountsPage })),
+)
 
 function RouteFallback() {
   return (
@@ -70,6 +73,9 @@ function ShellNavLinks({ onNavigate }: { onNavigate: () => void }) {
         </NavLink>
         <NavLink to="/telegram-auth" className={linkCls} onClick={onNavigate}>
           Telegram вход
+        </NavLink>
+        <NavLink to="/telegram-accounts" className={linkCls} onClick={onNavigate}>
+          Telegram аккаунты
         </NavLink>
       </NavBlock>
     </>
@@ -145,6 +151,7 @@ function App() {
             <Route path="/suppression" element={<SuppressionPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/telegram-auth" element={<TelegramAuthPage />} />
+            <Route path="/telegram-accounts" element={<TelegramAccountsPage />} />
           </Routes>
         </Suspense>
       </main>
