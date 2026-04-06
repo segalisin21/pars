@@ -95,6 +95,16 @@ def normalize_username(username: str | None) -> str | None:
     return u or None
 
 
+def _is_chat_admin_required_error(exc: Exception) -> bool:
+    # Telethon error type is not imported in the API runtime.
+    # We detect it by name to keep Telethon optional outside the worker.
+    name = type(exc).__name__
+    if name == "ChatAdminRequiredError":
+        return True
+    msg = str(exc)
+    return "Chat admin privileges are required" in msg
+
+
 def upsert_candidate(db: Session, workspace_id: int, tg: TgUser) -> CandidateUser:
     username = normalize_username(tg.username)
     now = utcnow()
@@ -317,16 +327,38 @@ def process_collect_run(db: Session, tg_client: TelegramClient, run: CollectRun)
             "new_candidates": 0,
             "updated_candidates": 0,
             "new_source_links": 0,
+            "errors": [],
         }
 
         seen: set[object] = set()
         participant_rows = 0
 
         if collect_mode in {"participants", "both", "auto"}:
-            for u in tg_client.iter_participants(src.identifier):
-                participant_rows += 1
-                seen.add(_collect_user_dedupe_key(u))
-                _ingest_user(u, sk, sid, "participants")
+            try:
+                for u in tg_client.iter_participants(src.identifier):
+                    participant_rows += 1
+                    seen.add(_collect_user_dedupe_key(u))
+                    _ingest_user(u, sk, sid, "participants")
+            except Exception as e:
+                if _is_chat_admin_required_error(e):
+                    by_source_id[sk]["errors"].append(
+                        {"code": "tg_admin_required", "message": "Chat admin privileges are required to list participants"}
+                    )
+                    # If we cannot read participants and this run is participants-only, fail gracefully.
+                    if collect_mode == "participants":
+                        run.status = "failed"
+                        run.finished_at = utcnow()
+                        run.stats = {
+                            "error": {"code": "tg_admin_required", "message": "Admin rights required for participants list"},
+                            "collect_mode": _aggregate_collect_mode_label(by_source_id),
+                            "by_source_id": by_source_id,
+                        }
+                        db.flush()
+                        return run
+                    # For "auto"/"both" we can still continue with messages.
+                    participant_rows = 0
+                else:
+                    raise
 
         run_messages = (
             collect_mode in {"messages", "both"}

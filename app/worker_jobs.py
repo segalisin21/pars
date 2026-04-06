@@ -90,7 +90,8 @@ def execute_collect_run(*, run_id: int) -> None:
                 run.source_ids,
                 _tg_client_mode(tg),
             )
-            raise
+            # Do not re-raise: we want the job to finish cleanly after persisting failure status/stats.
+            return
         finally:
             db.commit()
     finally:
