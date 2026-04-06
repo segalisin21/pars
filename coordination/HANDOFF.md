@@ -902,3 +902,8 @@ pytest tests/ -v --tb=short
 - **Existing Postgres:** run `scripts/migrate_telegram_accounts_pg.sql` once (or `create_all` on fresh DB).
 - **Scheduler:** must be deployed separately (cron) for auto-resume; requires `REDIS_URL` + same DB secrets as worker.
 - **Encryption key** must be identical on api and worker; loss of key = sessions cannot be decrypted.
+
+## 2026-04-06 (git: push to `test` — multi Telegram accounts)
+
+- **Commit:** `e14302a` — `feat(telegram): global encrypted accounts, worker selection, invite auto-resume`
+- **Remote:** `git push origin master:test` → `https://github.com/segalisin21/pars.git` branch `test` updated.
