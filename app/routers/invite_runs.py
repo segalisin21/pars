@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, InviteRun, InviteTarget, Source, TelegramAccount, utcnow
+from app.invite_deferred import DEFERRED_INVITE_EXPORT_CODES
+from app.models import AuditEvent, CandidateUser, InviteAttempt, InviteRun, InviteTarget, Source, TelegramAccount, utcnow
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import InviteRunCreate, InviteRunOut, InviteRunsList
@@ -36,6 +41,55 @@ def make_invite_runs_router(ctx: RouteContext) -> APIRouter:
     get_workspace_id = ctx.get_workspace_id
     verify_admin_token = ctx.verify_admin_token
     rq_timeout = ctx.rq_timeout_seconds
+    _DEFERRED_EXPORT_ROW_LIMIT = 50_000
+
+    @router.get("/invite-runs/{run_id}/export-deferred")
+    def export_invite_run_deferred(
+        run_id: int,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        run = db.get(InviteRun, run_id)
+        if run is None or run.workspace_id != workspace_id:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "invite_run_not_found", "message": "Invite run not found", "details": {"id": run_id}}},
+            )
+
+        codes = list(DEFERRED_INVITE_EXPORT_CODES)
+        stmt = (
+            select(InviteAttempt, CandidateUser)
+            .join(CandidateUser, InviteAttempt.candidate_id == CandidateUser.id)
+            .where(
+                InviteAttempt.workspace_id == workspace_id,
+                InviteAttempt.invite_run_id == run_id,
+                InviteAttempt.status == "failed",
+                InviteAttempt.error_code.in_(codes),
+            )
+            .order_by(InviteAttempt.id.asc())
+            .limit(_DEFERRED_EXPORT_ROW_LIMIT)
+        )
+        pairs = db.execute(stmt).all()
+
+        buf = StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["candidate_id", "tg_user_id", "username", "error_code"])
+        for att, cand in pairs:
+            writer.writerow(
+                [
+                    cand.id,
+                    "" if cand.tg_user_id is None else cand.tg_user_id,
+                    cand.username or "",
+                    att.error_code or "",
+                ]
+            )
+        payload = buf.getvalue().encode("utf-8")
+        return Response(
+            content=payload,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="invite-run-{run_id}-deferred.csv"'},
+        )
 
     @router.post("/invite-runs", response_model=InviteRunOut, status_code=202)
     def start_invite_run(

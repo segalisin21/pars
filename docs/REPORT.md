@@ -163,7 +163,8 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
   "policy": {
     "max_per_minute": 2,
     "max_per_hour": 30,
-    "cooldown_minutes": 1440
+    "cooldown_minutes": 1440,
+    "max_invites": null
   },
   "started_at": "2026-04-02T10:00:00Z",
   "finished_at": null,
@@ -180,7 +181,9 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
     "remaining_candidates": 120,
     "last_candidate_id": 5001,
     "resume_after_candidate_id": 5001,
-    "next_eligible_at": "2026-04-02T10:03:00+00:00"
+    "next_eligible_at": "2026-04-02T10:03:00+00:00",
+    "stop_reason": "invite_cap_reached",
+    "max_invites_cap": 100
   }
 }
 ```
@@ -189,6 +192,8 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
 
 `source_ids`: list of source ids. **Empty** = invite from **all** candidates in the workspace (default). **Non-empty** = only candidates that have a `candidate_source_links` row for at least one of these sources (same workspace).
 
+**`policy.max_invites` (optional):** integer `1`…`100000`, or omitted / `null` for **no cap**. When set, the run stops with `status="succeeded"` after that many **successful** `InviteToChannel` outcomes (not counting `skipped`). The `success` counter is **cumulative across pauses/resumes**, so a cap applies to the whole run.
+
 **`stats` (invite v1.5):**
 
 - `attempted`, `success`, `skipped`, `failed` — cumulative counters across pauses/resumes (merged when a paused run is resumed).
@@ -196,11 +201,27 @@ Audit action: `source.refresh_telegram_meta` (sync path only).
 - `remaining_candidates` — rough count of candidates still to scan in the current ordered pass (from resume cursor to end of list).
 - `last_candidate_id` — last candidate id that advanced the attempt counter in this run (progress hint).
 - `resume_after_candidate_id` — when pausing for pacing or FloodWait, the candidate id to retry first after **Resume** (same user is attempted again).
+- `stop_reason` — when the run ends early for a known reason, e.g. `invite_cap_reached` (with `max_invites_cap` echoing the policy cap).
 
 When `status="paused"`, `stats` may include:
 - `pause_reason`: `"pacing_limit"` | `"flood_wait"` | `"cancelled"` (after operator cancel)
 - `next_eligible_at`: ISO timestamp — earliest safe time to continue after pacing pause, or after FloodWait (aligned with Telegram wait seconds).
 - `flood_wait_seconds`: integer (only when `pause_reason="flood_wait"`)
+
+#### Ручной follow-up по «отложенным» приглашениям
+
+Приложение **не** шлёт автоматические ЛС кандидатам. Ошибки вида `privacy_restricted`, `not_mutual_contact` и др. фиксируются в `invite_attempts` со `status="failed"` и `error_code`.
+
+Примеры запросов:
+
+- `GET /invite-attempts?invite_run_id=<id>&status=failed&error_code=privacy_restricted`
+- `GET /invite-attempts?invite_run_id=<id>&status=failed&error_code=not_mutual_contact`
+
+#### `GET /invite-runs/{id}/export-deferred`
+
+Требует `ADMIN_TOKEN`, если он задан на сервере.
+
+Ответ `200`: `text/csv` с колонками `candidate_id`, `tg_user_id`, `username`, `error_code` — только строки со `status=failed` и `error_code` из фиксированного набора отложенных кодов (см. `app/invite_deferred.py`). Не более **50000** строк на запрос.
 
 ## Endpoints (v1)
 
@@ -330,7 +351,8 @@ Request:
   "policy": {
     "max_per_minute": 2,
     "max_per_hour": 30,
-    "cooldown_minutes": 1440
+    "cooldown_minutes": 1440,
+    "max_invites": null
   },
   "source_ids": [],
   "telegram_account_id": null
@@ -338,6 +360,8 @@ Request:
 ```
 
 `source_ids` optional; defaults to `[]` (all workspace candidates). Duplicate ids are deduplicated server-side. Each id must exist in the current workspace or the API returns `404` `source_not_found`.
+
+Optional `policy.max_invites`: см. раздел **InviteRun** выше.
 
 Optional `telegram_account_id`: global Telegram account; omit/`null` for auto-selection (same rules as collect runs).
 
@@ -385,6 +409,14 @@ Errors:
 - `404` `invite_run_not_found`
 
 Audit: `invite.cancel`
+
+#### `GET /invite-runs/{id}/export-deferred`
+
+См. контракт CSV в разделе **InviteRun** («Ручной follow-up»).
+
+Errors:
+
+- `404` `invite_run_not_found`
 
 ### Telegram accounts (global pool)
 

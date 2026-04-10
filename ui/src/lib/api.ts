@@ -348,6 +348,31 @@ export const api = {
     return request<InviteAttemptsList>(`/invite-attempts${qs ? `?${qs}` : ''}`)
   },
 
+  /** CSV: failed attempts with deferred follow-up error codes for this run (requires admin token when server uses ADMIN_TOKEN). */
+  downloadInviteRunDeferredCsv: async (runId: number): Promise<void> => {
+    const url = `${getBaseUrl()}/invite-runs/${runId}/export-deferred`
+    const headers = new Headers()
+    const token = getAdminToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    headers.set('X-Workspace-Id', getWorkspaceIdHeader())
+    const res = await fetch(url, { method: 'GET', headers })
+    if (!res.ok) {
+      const text = await res.text()
+      const json = parseJson(text)
+      const err = json as Partial<ApiError> | null
+      const msg = err?.error?.message || text || `HTTP ${res.status}`
+      const code = err?.error?.code
+      const details = err?.error?.details && typeof err.error.details === 'object' ? err.error.details : {}
+      throw new ApiRequestError(msg, res.status, code, details as Record<string, unknown>)
+    }
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `invite-run-${runId}-deferred.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  },
+
   listSuppression: (params?: { q?: string; reason?: string; active_only?: boolean; limit?: number; offset?: number }) => {
     const sp = new URLSearchParams()
     if (params?.q) sp.set('q', params.q)

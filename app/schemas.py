@@ -123,6 +123,17 @@ class InvitePolicy(BaseModel):
     max_per_minute: int = Field(default=2, ge=1, le=60)
     max_per_hour: int = Field(default=30, ge=1, le=10000)
     cooldown_minutes: int = Field(default=1440, ge=0, le=525600)
+    # Stop after this many successful channel invites (omit or null = no cap).
+    max_invites: int | None = Field(default=None)
+
+    @field_validator("max_invites")
+    @classmethod
+    def _validate_max_invites(cls, v: int | None) -> int | None:
+        if v is None:
+            return None
+        if v < 1 or v > 100_000:
+            raise ValueError("max_invites must be between 1 and 100000")
+        return v
 
 
 class InviteRunCreate(BaseModel):

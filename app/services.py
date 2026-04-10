@@ -504,6 +504,8 @@ def _invite_run_stats_payload(
     next_eligible_at: datetime | None = None,
     remaining_candidates: int | None = None,
     flood_wait_seconds: int | None = None,
+    stop_reason: str | None = None,
+    max_invites_cap: int | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "attempted": attempted,
@@ -524,6 +526,10 @@ def _invite_run_stats_payload(
         out["remaining_candidates"] = remaining_candidates
     if flood_wait_seconds is not None:
         out["flood_wait_seconds"] = flood_wait_seconds
+    if stop_reason is not None:
+        out["stop_reason"] = stop_reason
+    if max_invites_cap is not None:
+        out["max_invites_cap"] = max_invites_cap
     return out
 
 
@@ -587,6 +593,15 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
 
     max_per_minute = int(policy.get("max_per_minute", 2))
     max_per_hour = int(policy.get("max_per_hour", 30))
+    max_invites: int | None = None
+    raw_cap = policy.get("max_invites")
+    if raw_cap is not None:
+        try:
+            mx = int(raw_cap)
+            if 1 <= mx <= 100_000:
+                max_invites = mx
+        except (TypeError, ValueError):
+            pass
     window_min_start = monotonic()
     window_hour_start = monotonic()
     sent_in_min = 0
@@ -616,6 +631,24 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
             last_candidate_id = int(prev["last_candidate_id"])
         except (TypeError, ValueError):
             last_candidate_id = None
+
+    # Cap already reached in a previous segment (e.g. resume with nothing left to invite).
+    if max_invites is not None and success >= max_invites:
+        run.status = "succeeded"
+        run.finished_at = utcnow()
+        run.stats = _invite_run_stats_payload(
+            attempted=attempted,
+            success=success,
+            skipped=skipped,
+            failed=failed,
+            failed_by_code=failed_by_code,
+            last_candidate_id=last_candidate_id,
+            remaining_candidates=scan_total,
+            stop_reason="invite_cap_reached",
+            max_invites_cap=max_invites,
+        )
+        db.flush()
+        return run
 
     for idx, cand in enumerate(candidates):
         remaining_candidates = max(0, scan_total - idx)
@@ -712,6 +745,22 @@ def process_invite_run(db: Session, tg_client: TelegramClient, run: InviteRun) -
                     attempted_at=utcnow(),
                 )
             )
+            if max_invites is not None and success >= max_invites:
+                run.status = "succeeded"
+                run.finished_at = utcnow()
+                run.stats = _invite_run_stats_payload(
+                    attempted=attempted,
+                    success=success,
+                    skipped=skipped,
+                    failed=failed,
+                    failed_by_code=failed_by_code,
+                    last_candidate_id=last_candidate_id,
+                    remaining_candidates=remaining_candidates,
+                    stop_reason="invite_cap_reached",
+                    max_invites_cap=max_invites,
+                )
+                db.flush()
+                return run
         except FloodWaitError as e:
             failed += 1
             code = "flood_wait"

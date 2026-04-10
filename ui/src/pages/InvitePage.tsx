@@ -42,6 +42,16 @@ function formatNextEligible(iso: string | undefined): string | null {
   return `~${mins} мин`
 }
 
+const DEFERRED_FOLLOWUP_CODES = ['privacy_restricted', 'not_mutual_contact'] as const
+
+function stopReasonHint(code: string | null): string | null {
+  if (!code) return null
+  if (code === 'invite_cap_reached') {
+    return 'Достигнут лимит успешных приглашений (max_invites). При необходимости запустите ещё один run для оставшихся кандидатов.'
+  }
+  return null
+}
+
 function pauseReasonHint(code: string | null): string | null {
   if (!code) return null
   switch (code) {
@@ -88,6 +98,8 @@ export function InvitePage() {
   const didInitTarget = useRef(false)
   const [tgAccounts, setTgAccounts] = useState<{ id: number; label: string }[] | null>(null)
   const [accountChoice, setAccountChoice] = useState<string>('')
+  const [maxInvites, setMaxInvites] = useState('')
+  const [exportBusy, setExportBusy] = useState(false)
 
   const enabledTargets = useMemo(() => (targets ?? []).filter((t) => t.enabled), [targets])
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
@@ -195,13 +207,20 @@ export function InvitePage() {
         inviteSourceIds.size === 0 ? [] : [...inviteSourceIds].sort((a, b) => a - b)
       const invitePayload: {
         target_id: number
-        policy: { max_per_minute: number; max_per_hour: number; cooldown_minutes: number }
+        policy: { max_per_minute: number; max_per_hour: number; cooldown_minutes: number; max_invites?: number }
         source_ids: number[]
         telegram_account_id?: number
       } = {
         target_id: targetId,
         policy: { max_per_minute: p.max_per_minute, max_per_hour: p.max_per_hour, cooldown_minutes: p.cooldown_minutes },
         source_ids,
+      }
+      const capRaw = maxInvites.trim()
+      if (capRaw !== '') {
+        const n = Number(capRaw)
+        if (Number.isInteger(n) && n >= 1 && n <= 100_000) {
+          invitePayload.policy.max_invites = n
+        }
       }
       if (accountChoice !== '') {
         const n = Number(accountChoice)
@@ -231,6 +250,21 @@ export function InvitePage() {
       setErrCode(f.code ?? null)
     } finally {
       setActionBusyId(null)
+    }
+  }
+
+  async function downloadDeferredCsv(id: number) {
+    setExportBusy(true)
+    setErr(null)
+    setErrCode(null)
+    try {
+      await api.downloadInviteRunDeferredCsv(id)
+    } catch (e) {
+      const f = formatApiError(e)
+      setErr(f.message)
+      setErrCode(f.code ?? null)
+    } finally {
+      setExportBusy(false)
     }
   }
 
@@ -307,8 +341,18 @@ export function InvitePage() {
                 const nextHuman = formatNextEligible(nextIso)
                 const fbc = st.failed_by_code as Record<string, unknown> | undefined
                 const fbcEntries = fbc ? Object.entries(fbc).filter(([, v]) => Number(v) > 0) : []
+                const sr = st.stop_reason != null ? String(st.stop_reason) : null
+                const capEcho = st.max_invites_cap != null ? String(st.max_invites_cap) : null
+                const srHint = stopReasonHint(sr)
                 return (
                   <>
+                    {sr ? (
+                      <div className="mono small" style={{ marginTop: 8 }}>
+                        stop_reason: {sr}
+                        {capEcho ? ` · max_invites_cap: ${capEcho}` : ''}
+                      </div>
+                    ) : null}
+                    {srHint ? <div className="hint" style={{ marginTop: 6 }}>{srHint}</div> : null}
                     {pr ? (
                       <div className="badge warn" style={{ marginTop: 8 }}>
                         {pr}
@@ -339,6 +383,24 @@ export function InvitePage() {
                         </div>
                       </div>
                     ) : null}
+                    {DEFERRED_FOLLOWUP_CODES.some((code) => Number(fbc?.[code] ?? 0) > 0) ? (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="label">Ручной follow-up (без авто-ЛС из приложения)</div>
+                        <div className="row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                          {DEFERRED_FOLLOWUP_CODES.map((code) =>
+                            Number(fbc?.[code] ?? 0) > 0 ? (
+                              <Link
+                                key={code}
+                                className="btn"
+                                to={`/attempts?invite_run_id=${focusedRun.id}&status=failed&error_code=${encodeURIComponent(code)}`}
+                              >
+                                Попытки: {code} ({String(fbc?.[code])})
+                              </Link>
+                            ) : null,
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: 'wrap' }}>
                       {focusedRun.status === 'paused' ? (
                         <>
@@ -363,6 +425,14 @@ export function InvitePage() {
                       <Link to={`/attempts?invite_run_id=${focusedRun.id}`} className="btn">
                         Попытки этого запуска
                       </Link>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={exportBusy}
+                        onClick={() => void downloadDeferredCsv(focusedRun.id)}
+                      >
+                        {exportBusy ? 'CSV…' : 'CSV отложенных'}
+                      </button>
                     </div>
                   </>
                 )
@@ -411,6 +481,19 @@ export function InvitePage() {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="field">
+                <div className="label">Макс. успешных</div>
+                <input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  placeholder="без лимита"
+                  value={maxInvites}
+                  onChange={(e) => setMaxInvites(e.target.value)}
+                  disabled={busy}
+                  style={{ width: 120 }}
+                />
               </label>
               {tgAccounts && tgAccounts.length > 0 ? (
                 <label className="field">

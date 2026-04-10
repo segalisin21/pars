@@ -1,5 +1,30 @@
 # Handoff
 
+## 2026-04-10
+
+### What changed
+
+- Invite policy: optional `max_invites` (1…100000); run stops with `stats.stop_reason=invite_cap_reached` and `max_invites_cap` after that many **successful** invites; counters stay cumulative across pause/resume.
+- Deferred follow-up: `GET /invite-runs/{id}/export-deferred` (CSV, admin when `ADMIN_TOKEN` set); codes in `app/invite_deferred.py`.
+- UI: Invite page cap field, run detail shows cap stop reason + links to `/attempts` with `status=failed` + `error_code`; Attempts page reads `status` / `error_code` from URL; CSV download action.
+- Docs: `docs/REPORT.md` updated for policy, stats, export, manual follow-up query examples.
+
+### Key files
+
+- `app/schemas.py`, `app/services.py`, `app/invite_deferred.py`, `app/routers/invite_runs.py`
+- `ui/src/pages/InvitePage.tsx`, `ui/src/pages/AttemptsPage.tsx`, `ui/src/lib/api.ts`
+- `tests/test_invite_cap_and_export.py`, `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- CSV export capped at 50k rows; very large runs may need repeated filtered pulls via `GET /invite-attempts`.
+
 ## 2026-04-02
 
 ### What changed
