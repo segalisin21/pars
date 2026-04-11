@@ -130,6 +130,9 @@ def create_app(
             def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
                 return None
 
+            def send_direct_message(self, tg_user_id: int, text: str) -> None:
+                return None
+
         tg_client = _NoopTelegramClient()
 
     get_db = make_get_db(session_factory)

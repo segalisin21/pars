@@ -169,6 +169,105 @@ class InviteRunsList(BaseModel):
     items: list[InviteRunOut]
 
 
+class BroadcastPolicy(BaseModel):
+    max_per_minute: int = Field(default=2, ge=1, le=60)
+    max_per_hour: int = Field(default=30, ge=1, le=10000)
+    max_total: int | None = Field(default=None)
+
+    @field_validator("max_total")
+    @classmethod
+    def _validate_max_total(cls, v: int | None) -> int | None:
+        if v is None:
+            return None
+        if v < 1 or v > 100_000:
+            raise ValueError("max_total must be between 1 and 100000")
+        return v
+
+
+class BroadcastRunCreate(BaseModel):
+    message_key: str = Field(min_length=1, max_length=128)
+    message_body: str = Field(min_length=1, max_length=4096)
+    policy: BroadcastPolicy = Field(default_factory=BroadcastPolicy)
+    source_ids: list[int] = Field(default_factory=list, max_length=50)
+    candidate_ids: list[int] = Field(default_factory=list, max_length=5000)
+    telegram_account_id: int | None = None
+
+    @field_validator("message_key")
+    @classmethod
+    def _normalize_message_key(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("message_key is required")
+        for ch in s:
+            if not (ch.isalnum() or ch in ("_", "-", ".")):
+                raise ValueError("message_key allows only letters, digits, underscore, hyphen, dot")
+        return s
+
+    @field_validator("source_ids", mode="after")
+    @classmethod
+    def _dedupe_source_ids(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+    @field_validator("candidate_ids", mode="after")
+    @classmethod
+    def _dedupe_candidate_ids(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+
+class BroadcastPreviewIn(BaseModel):
+    message_key: str = Field(min_length=1, max_length=128)
+    source_ids: list[int] = Field(default_factory=list, max_length=50)
+    candidate_ids: list[int] = Field(default_factory=list, max_length=5000)
+
+    @field_validator("message_key")
+    @classmethod
+    def _normalize_preview_key(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            raise ValueError("message_key is required")
+        return s
+
+    @field_validator("source_ids", mode="after")
+    @classmethod
+    def _dedupe_preview_sources(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+    @field_validator("candidate_ids", mode="after")
+    @classmethod
+    def _dedupe_preview_candidates(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+
+class BroadcastPreviewOut(BaseModel):
+    scan_total: int
+    suppressed: int
+    missing_tg_user_id: int
+    already_sent: int
+    eligible: int
+
+
+class BroadcastRunOut(BaseModel):
+    id: int
+    status: str
+    message_key: str
+    message_body: str
+    source_ids: list[int]
+    candidate_ids: list[int]
+    telegram_account_id: int | None = None
+    policy: dict[str, Any]
+    started_at: datetime
+    finished_at: datetime | None
+    stats: dict[str, Any]
+
+    @field_serializer("started_at", "finished_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class BroadcastRunsList(BaseModel):
+    items: list[BroadcastRunOut]
+
+
 class TelegramRequestCodeIn(BaseModel):
     phone: str = Field(min_length=3, max_length=32)
 

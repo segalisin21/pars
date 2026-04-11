@@ -10,6 +10,7 @@ const SourcesPage = lazy(() => import('./pages/SourcesPage').then((m) => ({ defa
 const TargetsPage = lazy(() => import('./pages/TargetsPage').then((m) => ({ default: m.TargetsPage })))
 const CollectPage = lazy(() => import('./pages/CollectPage').then((m) => ({ default: m.CollectPage })))
 const InvitePage = lazy(() => import('./pages/InvitePage').then((m) => ({ default: m.InvitePage })))
+const BroadcastPage = lazy(() => import('./pages/BroadcastPage').then((m) => ({ default: m.BroadcastPage })))
 const CandidatesPage = lazy(() => import('./pages/CandidatesPage').then((m) => ({ default: m.CandidatesPage })))
 const AttemptsPage = lazy(() => import('./pages/AttemptsPage').then((m) => ({ default: m.AttemptsPage })))
 const SuppressionPage = lazy(() => import('./pages/SuppressionPage').then((m) => ({ default: m.SuppressionPage })))
@@ -54,6 +55,9 @@ function ShellNavLinks({ onNavigate }: { onNavigate: () => void }) {
         </NavLink>
         <NavLink to="/invite" className={linkCls} onClick={onNavigate}>
           Инвайт
+        </NavLink>
+        <NavLink to="/broadcast" className={linkCls} onClick={onNavigate}>
+          Рассылка
         </NavLink>
       </NavBlock>
       <NavBlock label="Данные">
@@ -146,6 +150,8 @@ function App() {
             <Route path="/collect/:runId" element={<CollectPage />} />
             <Route path="/invite" element={<InvitePage />} />
             <Route path="/invite/:runId" element={<InvitePage />} />
+            <Route path="/broadcast" element={<BroadcastPage />} />
+            <Route path="/broadcast/:runId" element={<BroadcastPage />} />
             <Route path="/candidates" element={<CandidatesPage />} />
             <Route path="/attempts" element={<AttemptsPage />} />
             <Route path="/suppression" element={<SuppressionPage />} />

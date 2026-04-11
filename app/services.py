@@ -11,6 +11,8 @@ from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
+    BroadcastDelivery,
+    BroadcastRun,
     CandidateSourceLink,
     CandidateUser,
     CollectRun,
@@ -848,3 +850,531 @@ def run_invite(
     db.add(run)
     db.flush()
     return process_invite_run(db, tg_client, run)
+
+
+def _broadcast_run_source_ids(run: BroadcastRun) -> list[int]:
+    raw = getattr(run, "source_ids", None)
+    if not isinstance(raw, list) or len(raw) == 0:
+        return []
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _broadcast_run_candidate_ids(run: BroadcastRun) -> list[int]:
+    raw = getattr(run, "candidate_ids", None)
+    if not isinstance(raw, list) or len(raw) == 0:
+        return []
+    out: list[int] = []
+    for x in raw:
+        try:
+            out.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def _broadcast_candidate_stmt(
+    *,
+    workspace_id: int,
+    source_ids: list[int],
+    candidate_ids: list[int],
+    resume_after: int,
+):
+    linked_subq = None
+    if source_ids:
+        linked_subq = (
+            select(CandidateSourceLink.candidate_id)
+            .where(
+                CandidateSourceLink.workspace_id == workspace_id,
+                CandidateSourceLink.source_id.in_(source_ids),
+            )
+            .distinct()
+        )
+
+    cand_stmt = select(CandidateUser).where(CandidateUser.workspace_id == workspace_id).order_by(CandidateUser.id.asc())
+    if resume_after > 0:
+        cand_stmt = cand_stmt.where(CandidateUser.id >= resume_after)
+
+    if candidate_ids and source_ids:
+        cand_stmt = cand_stmt.where(
+            CandidateUser.id.in_(candidate_ids),
+            CandidateUser.id.in_(linked_subq),
+        )
+    elif candidate_ids:
+        cand_stmt = cand_stmt.where(CandidateUser.id.in_(candidate_ids))
+    elif source_ids:
+        cand_stmt = cand_stmt.where(CandidateUser.id.in_(linked_subq))
+
+    return cand_stmt
+
+
+def _broadcast_run_stats_payload(
+    *,
+    attempted: int,
+    success: int,
+    skipped: int,
+    skipped_duplicate: int,
+    failed: int,
+    failed_by_code: dict[str, int],
+    last_candidate_id: int | None = None,
+    resume_after_candidate_id: int | None = None,
+    pause_reason: str | None = None,
+    next_eligible_at: datetime | None = None,
+    remaining_candidates: int | None = None,
+    flood_wait_seconds: int | None = None,
+    stop_reason: str | None = None,
+    max_total_cap: int | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "attempted": attempted,
+        "success": success,
+        "skipped": skipped,
+        "skipped_duplicate": skipped_duplicate,
+        "failed": failed,
+        "failed_by_code": dict(failed_by_code),
+    }
+    if last_candidate_id is not None:
+        out["last_candidate_id"] = last_candidate_id
+    if resume_after_candidate_id is not None:
+        out["resume_after_candidate_id"] = resume_after_candidate_id
+    if pause_reason is not None:
+        out["pause_reason"] = pause_reason
+    if next_eligible_at is not None:
+        out["next_eligible_at"] = next_eligible_at.isoformat()
+    if remaining_candidates is not None:
+        out["remaining_candidates"] = remaining_candidates
+    if flood_wait_seconds is not None:
+        out["flood_wait_seconds"] = flood_wait_seconds
+    if stop_reason is not None:
+        out["stop_reason"] = stop_reason
+    if max_total_cap is not None:
+        out["max_total_cap"] = max_total_cap
+    return out
+
+
+def _broadcast_already_sent(db: Session, workspace_id: int, message_key: str, tg_user_id: int) -> bool:
+    n = db.scalar(
+        select(func.count(BroadcastDelivery.id)).where(
+            BroadcastDelivery.workspace_id == workspace_id,
+            BroadcastDelivery.message_key == message_key,
+            BroadcastDelivery.tg_user_id == tg_user_id,
+            BroadcastDelivery.status == "success",
+        )
+    )
+    return bool(n and n > 0)
+
+
+def _classify_dm_error(exc: BaseException) -> str:
+    if isinstance(exc, FloodWaitError):
+        return "flood_wait"
+    name = type(exc).__name__
+    mapping = {
+        "UserPrivacyRestrictedError": "privacy_restricted",
+        "UserIsBlockedError": "user_blocked",
+        "InputUserDeactivatedError": "user_deactivated",
+        "PeerIdInvalidError": "peer_invalid",
+        "UserBotError": "user_bot",
+        "ChatWriteForbiddenError": "write_forbidden",
+    }
+    if name in mapping:
+        return mapping[name]
+    return _classify_invite_error(exc)
+
+
+def _maybe_suppress_after_dm_failure(
+    db: Session, workspace_id: int, candidate: CandidateUser, error_code: str
+) -> None:
+    if error_code not in {"user_blocked", "user_deactivated"}:
+        return
+    if is_suppressed(db, workspace_id, candidate, utcnow()):
+        return
+    db.add(
+        SuppressionList(
+            workspace_id=workspace_id,
+            tg_user_id=candidate.tg_user_id,
+            username=normalize_username(candidate.username),
+            reason=f"dm_{error_code}",
+            until=None,
+        )
+    )
+    db.flush()
+
+
+def count_broadcast_preview(
+    db: Session,
+    workspace_id: int,
+    *,
+    message_key: str,
+    source_ids: list[int],
+    candidate_ids: list[int],
+) -> dict[str, int]:
+    """Dry-run counts without creating a run (no Telegram calls)."""
+    sids = sorted(set(source_ids))
+    cids = sorted(set(candidate_ids))
+    stmt = _broadcast_candidate_stmt(
+        workspace_id=workspace_id,
+        source_ids=sids,
+        candidate_ids=cids,
+        resume_after=0,
+    )
+    candidates = db.scalars(stmt).all()
+    now = utcnow()
+    scan_total = len(candidates)
+    suppressed_n = 0
+    missing_id_n = 0
+    already_sent_n = 0
+    eligible_n = 0
+    for cand in candidates:
+        if is_suppressed(db, workspace_id, cand, now):
+            suppressed_n += 1
+            continue
+        if cand.tg_user_id is None:
+            missing_id_n += 1
+            continue
+        if _broadcast_already_sent(db, workspace_id, message_key, int(cand.tg_user_id)):
+            already_sent_n += 1
+            continue
+        eligible_n += 1
+    return {
+        "scan_total": scan_total,
+        "suppressed": suppressed_n,
+        "missing_tg_user_id": missing_id_n,
+        "already_sent": already_sent_n,
+        "eligible": eligible_n,
+    }
+
+
+def process_broadcast_run(
+    db: Session,
+    tg_client: TelegramClient,
+    run: BroadcastRun,
+    *,
+    telegram_account_id: int | None = None,
+) -> BroadcastRun:
+    workspace_id = run.workspace_id
+    message_key = (run.message_key or "").strip()
+    if not message_key:
+        raise ValueError("message_key_required")
+
+    run.status = "running"
+    if run.started_at is None:
+        run.started_at = utcnow()
+    run.finished_at = None
+    if not isinstance(run.stats, dict):
+        run.stats = {}
+    db.flush()
+
+    logger.info(
+        "broadcast_run processing run_id=%s workspace_id=%s message_key=%s",
+        run.id,
+        workspace_id,
+        message_key,
+    )
+
+    policy = run.policy if isinstance(run.policy, dict) else {}
+    max_per_minute = int(policy.get("max_per_minute", 2))
+    max_per_hour = int(policy.get("max_per_hour", 30))
+    max_total: int | None = None
+    raw_cap = policy.get("max_total")
+    if raw_cap is not None:
+        try:
+            mx = int(raw_cap)
+            if 1 <= mx <= 100_000:
+                max_total = mx
+        except (TypeError, ValueError):
+            pass
+
+    prev = dict(run.stats) if isinstance(run.stats, dict) else {}
+    attempted = int(prev.get("attempted", 0))
+    success = int(prev.get("success", 0))
+    skipped = int(prev.get("skipped", 0))
+    skipped_duplicate = int(prev.get("skipped_duplicate", 0))
+    failed = int(prev.get("failed", 0))
+    failed_by_code: dict[str, int] = {
+        k: int(v) for k, v in (prev.get("failed_by_code") or {}).items() if isinstance(k, str)
+    }
+
+    resume_after = int(prev.get("resume_after_candidate_id") or 0)
+    source_ids_filter = _broadcast_run_source_ids(run)
+    candidate_ids_filter = _broadcast_run_candidate_ids(run)
+
+    cand_stmt = _broadcast_candidate_stmt(
+        workspace_id=workspace_id,
+        source_ids=source_ids_filter,
+        candidate_ids=candidate_ids_filter,
+        resume_after=resume_after,
+    )
+
+    count_base = select(func.count()).select_from(CandidateUser).where(CandidateUser.workspace_id == workspace_id)
+    if resume_after > 0:
+        count_base = count_base.where(CandidateUser.id >= resume_after)
+    if candidate_ids_filter and source_ids_filter:
+        count_base = count_base.where(
+            CandidateUser.id.in_(candidate_ids_filter),
+            CandidateUser.id.in_(
+                select(CandidateSourceLink.candidate_id)
+                .where(
+                    CandidateSourceLink.workspace_id == workspace_id,
+                    CandidateSourceLink.source_id.in_(source_ids_filter),
+                )
+                .distinct()
+            ),
+        )
+    elif candidate_ids_filter:
+        count_base = count_base.where(CandidateUser.id.in_(candidate_ids_filter))
+    elif source_ids_filter:
+        count_base = count_base.where(
+            CandidateUser.id.in_(
+                select(CandidateSourceLink.candidate_id)
+                .where(
+                    CandidateSourceLink.workspace_id == workspace_id,
+                    CandidateSourceLink.source_id.in_(source_ids_filter),
+                )
+                .distinct()
+            )
+        )
+    scan_total = int(db.scalar(count_base) or 0)
+
+    candidates = db.scalars(cand_stmt).all()
+    last_candidate_id: int | None = None
+    if prev.get("last_candidate_id") is not None:
+        try:
+            last_candidate_id = int(prev["last_candidate_id"])
+        except (TypeError, ValueError):
+            last_candidate_id = None
+
+    window_min_start = monotonic()
+    window_hour_start = monotonic()
+    sent_in_min = 0
+    sent_in_hour = 0
+
+    now = utcnow()
+    body = run.message_body if isinstance(run.message_body, str) else ""
+
+    if max_total is not None and success >= max_total:
+        run.status = "succeeded"
+        run.finished_at = utcnow()
+        run.stats = _broadcast_run_stats_payload(
+            attempted=attempted,
+            success=success,
+            skipped=skipped,
+            skipped_duplicate=skipped_duplicate,
+            failed=failed,
+            failed_by_code=failed_by_code,
+            last_candidate_id=last_candidate_id,
+            remaining_candidates=scan_total,
+            stop_reason="max_total_reached",
+            max_total_cap=max_total,
+        )
+        db.flush()
+        return run
+
+    acc_id = telegram_account_id
+    if acc_id is None:
+        acc_id = getattr(run, "telegram_account_id", None)
+
+    for idx, cand in enumerate(candidates):
+        remaining_candidates = max(0, scan_total - idx)
+        if is_suppressed(db, workspace_id, cand, now):
+            continue
+
+        last_candidate_id = cand.id
+
+        if cand.tg_user_id is None:
+            skipped += 1
+            continue
+
+        tgid = int(cand.tg_user_id)
+        if _broadcast_already_sent(db, workspace_id, message_key, tgid):
+            skipped_duplicate += 1
+            db.add(
+                BroadcastDelivery(
+                    workspace_id=workspace_id,
+                    broadcast_run_id=run.id,
+                    message_key=message_key,
+                    candidate_id=cand.id,
+                    tg_user_id=tgid,
+                    status="skipped",
+                    error_code="already_sent",
+                    attempted_at=utcnow(),
+                )
+            )
+            continue
+
+        attempted += 1
+
+        try:
+            now_m = monotonic()
+            if now_m - window_min_start >= 60:
+                window_min_start = now_m
+                sent_in_min = 0
+            if now_m - window_hour_start >= 3600:
+                window_hour_start = now_m
+                sent_in_hour = 0
+            if sent_in_min >= max_per_minute or sent_in_hour >= max_per_hour:
+                next_eligible_at = _compute_next_eligible_at_pacing(
+                    sent_in_min=sent_in_min,
+                    sent_in_hour=sent_in_hour,
+                    max_per_minute=max_per_minute,
+                    max_per_hour=max_per_hour,
+                    window_min_start=window_min_start,
+                    window_hour_start=window_hour_start,
+                )
+                run.status = "paused"
+                run.stats = _broadcast_run_stats_payload(
+                    attempted=attempted,
+                    success=success,
+                    skipped=skipped,
+                    skipped_duplicate=skipped_duplicate,
+                    failed=failed,
+                    failed_by_code=failed_by_code,
+                    last_candidate_id=last_candidate_id,
+                    resume_after_candidate_id=cand.id,
+                    pause_reason="pacing_limit",
+                    next_eligible_at=next_eligible_at,
+                    remaining_candidates=remaining_candidates,
+                )
+                db.flush()
+                return run
+
+            tg_client.send_direct_message(tgid, body)
+            try:
+                with db.begin_nested():
+                    db.add(
+                        BroadcastDelivery(
+                            workspace_id=workspace_id,
+                            broadcast_run_id=run.id,
+                            message_key=message_key,
+                            candidate_id=cand.id,
+                            tg_user_id=tgid,
+                            status="success",
+                            error_code=None,
+                            attempted_at=utcnow(),
+                        )
+                    )
+                    db.flush()
+            except IntegrityError:
+                skipped_duplicate += 1
+            else:
+                success += 1
+                sent_in_min += 1
+                sent_in_hour += 1
+        except FloodWaitError as e:
+            failed += 1
+            code = "flood_wait"
+            _merge_failed_by_code(failed_by_code, code)
+            db.add(
+                BroadcastDelivery(
+                    workspace_id=workspace_id,
+                    broadcast_run_id=run.id,
+                    message_key=message_key,
+                    candidate_id=cand.id,
+                    tg_user_id=tgid,
+                    status="failed",
+                    error_code=code,
+                    attempted_at=utcnow(),
+                )
+            )
+            fw = int(getattr(e, "seconds", 0) or 0)
+            next_eligible_at = utcnow() + timedelta(seconds=max(1, fw))
+            mark_account_cooldown(db, acc_id, next_eligible_at)
+            run.status = "paused"
+            run.stats = _broadcast_run_stats_payload(
+                attempted=attempted,
+                success=success,
+                skipped=skipped,
+                skipped_duplicate=skipped_duplicate,
+                failed=failed,
+                failed_by_code=failed_by_code,
+                last_candidate_id=last_candidate_id,
+                resume_after_candidate_id=cand.id,
+                pause_reason="flood_wait",
+                next_eligible_at=next_eligible_at,
+                remaining_candidates=remaining_candidates,
+                flood_wait_seconds=fw,
+            )
+            db.flush()
+            return run
+        except Exception as e:
+            failed += 1
+            code = _classify_dm_error(e)
+            _merge_failed_by_code(failed_by_code, code)
+            db.add(
+                BroadcastDelivery(
+                    workspace_id=workspace_id,
+                    broadcast_run_id=run.id,
+                    message_key=message_key,
+                    candidate_id=cand.id,
+                    tg_user_id=tgid,
+                    status="failed",
+                    error_code=code,
+                    attempted_at=utcnow(),
+                )
+            )
+            _maybe_suppress_after_dm_failure(db, workspace_id, cand, code)
+
+        if max_total is not None and success >= max_total:
+            run.status = "succeeded"
+            run.finished_at = utcnow()
+            run.stats = _broadcast_run_stats_payload(
+                attempted=attempted,
+                success=success,
+                skipped=skipped,
+                skipped_duplicate=skipped_duplicate,
+                failed=failed,
+                failed_by_code=failed_by_code,
+                last_candidate_id=last_candidate_id,
+                remaining_candidates=remaining_candidates,
+                stop_reason="max_total_reached",
+                max_total_cap=max_total,
+            )
+            db.flush()
+            return run
+
+    run.status = "succeeded"
+    run.finished_at = utcnow()
+    run.stats = _broadcast_run_stats_payload(
+        attempted=attempted,
+        success=success,
+        skipped=skipped,
+        skipped_duplicate=skipped_duplicate,
+        failed=failed,
+        failed_by_code=failed_by_code,
+        last_candidate_id=last_candidate_id,
+        remaining_candidates=0,
+    )
+    return run
+
+
+def run_broadcast(
+    db: Session,
+    tg_client: TelegramClient,
+    workspace_id: int,
+    *,
+    message_key: str,
+    message_body: str,
+    source_ids: list[int] | None = None,
+    candidate_ids: list[int] | None = None,
+    policy: dict,
+    telegram_account_id: int | None = None,
+) -> BroadcastRun:
+    run = BroadcastRun(
+        workspace_id=workspace_id,
+        status="running",
+        message_key=(message_key or "").strip(),
+        message_body=message_body,
+        source_ids=list(source_ids) if source_ids is not None else [],
+        candidate_ids=list(candidate_ids) if candidate_ids is not None else [],
+        policy=policy,
+        telegram_account_id=telegram_account_id,
+        started_at=utcnow(),
+        stats={},
+    )
+    db.add(run)
+    db.flush()
+    return process_broadcast_run(db, tg_client, run, telegram_account_id=telegram_account_id)

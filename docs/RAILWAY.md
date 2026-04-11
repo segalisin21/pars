@@ -69,6 +69,7 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
   - `APP_ENCRYPTION_KEY` = same Fernet key as `api` (required to decrypt stored session strings)
   - `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (recommended for large groups; default may be too small)
   - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
+  - `RQ_BROADCAST_TIMEOUT_SECONDS` = `1800` (DM broadcast RQ jobs)
   - `COLLECT_BATCH_SIZE` = `300` (how often we commit progress during collect)
   - `COLLECT_PROGRESS_EVERY` = `500` (how often we log progress during collect)
   - `COLLECT_MODE` = `participants` (default) | `messages` | `both` | `auto` — **fallback** only if a source row has an invalid/missing `collect_mode` (normally each source is configured via API/UI)
@@ -80,15 +81,15 @@ If you see `ImportError: cannot import name 'Connection' from 'rq'`, redeploy wi
 
 > Important: `worker` must not be public.
 
-### Invite auto-resume (paused runs)
+### Invite / broadcast auto-resume (paused runs)
 
-When an invite run pauses for **pacing** or **FloodWait**, `stats.next_eligible_at` stores when it may continue. To **automatically** set `status` back to `queued` and enqueue the worker (without manual **Resume**), run the scheduler on a cron (e.g. every minute) with the same env as `worker`:
+When an invite or **broadcast** run pauses for **pacing** or **FloodWait**, `stats.next_eligible_at` stores when it may continue. To **automatically** set `status` back to `queued` and enqueue the worker (without manual **Resume**), run the scheduler on a cron (e.g. every minute) with the same env as `worker`:
 
 ```bash
 python -m app.invite_scheduler
 ```
 
-Requires `REDIS_URL`, `DATABASE_URL`, and (if using encrypted DB accounts) `APP_ENCRYPTION_KEY`. Add a small Railway **Cron** or duplicate service with this start command.
+This process resumes **both** paused invite runs and paused broadcast runs. Requires `REDIS_URL`, `DATABASE_URL`, and (if using encrypted DB accounts) `APP_ENCRYPTION_KEY`. Add a small Railway **Cron** or duplicate service with this start command.
 
 ### Service: `ui`
 
@@ -212,6 +213,7 @@ If collect runs against large groups/channels, fetching participants can take mi
 
 - `RQ_COLLECT_TIMEOUT_SECONDS` = `1800` (or `3600`)
 - `RQ_INVITE_TIMEOUT_SECONDS` = `1800`
+- `RQ_BROADCAST_TIMEOUT_SECONDS` = `1800` (DM broadcast jobs)
 
 ### Invite tuning (single Telegram account)
 
@@ -225,7 +227,7 @@ If collect runs against large groups/channels, fetching participants can take mi
   - `GET /health` should return `{"status":"ok"}`
 - UI:
   - open `Sources` / `Targets` pages, create entries
-  - run `Collect`, then run `Invite`
+  - run `Collect`, then run `Invite` or `Broadcast` (рассылка)
 
 ## 5) Security notes (must)
 

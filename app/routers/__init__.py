@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.routers.audit import make_audit_router
+from app.routers.broadcast_runs import make_broadcast_runs_router
 from app.routers.candidates import make_candidates_router
 from app.routers.collect_runs import make_collect_runs_router
 from app.routers.context import RouteContext
@@ -28,6 +29,7 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
     app.include_router(make_suppression_router(ctx))
     app.include_router(make_collect_runs_router(ctx))
     app.include_router(make_invite_runs_router(ctx))
+    app.include_router(make_broadcast_runs_router(ctx))
     app.include_router(make_audit_router(ctx))
     app.include_router(make_telegram_auth_router(ctx))
     app.include_router(make_telegram_accounts_router(ctx))

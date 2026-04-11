@@ -25,6 +25,7 @@ def _app_encryption_key_autouse():
 class FakeTelegramClient(TelegramClient):
     def __init__(self):
         self.invite_calls: list[tuple[str, int]] = []
+        self.dm_calls: list[tuple[int, str]] = []
         self.participants_by_source: dict[str, list[TgUser]] = {}
         self.message_senders_by_source: dict[str, list[TgUser]] = {}
         self.flood_on_user_ids: set[int] = set()
@@ -45,6 +46,11 @@ class FakeTelegramClient(TelegramClient):
 
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         self.invite_calls.append((target_identifier, tg_user_id))
+        if tg_user_id in self.flood_on_user_ids:
+            raise FloodWaitError(60)
+
+    def send_direct_message(self, tg_user_id: int, text: str) -> None:
+        self.dm_calls.append((tg_user_id, text))
         if tg_user_id in self.flood_on_user_ids:
             raise FloodWaitError(60)
 

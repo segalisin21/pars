@@ -28,7 +28,7 @@
 
 #### Admin token (mandatory before go-live)
 
-All mutating endpoints (`POST /sources`, `POST /targets`, `POST /collect-runs`, `POST /invite-runs`, `PATCH /sources/{id}`, `PATCH /targets/{id}`, `POST /telegram-accounts`, `PATCH /telegram-accounts/{id}`, `DELETE /telegram-accounts/{id}`, `POST /telegram-accounts/{id}/test`) require a bearer token:
+All mutating endpoints (`POST /sources`, `POST /targets`, `POST /collect-runs`, `POST /invite-runs`, `POST /broadcast-runs`, `POST /broadcast-runs/preview`, `POST /broadcast-runs/{id}/resume`, `POST /broadcast-runs/{id}/cancel`, `PATCH /sources/{id}`, `PATCH /targets/{id}`, `POST /telegram-accounts`, `PATCH /telegram-accounts/{id}`, `DELETE /telegram-accounts/{id}`, `POST /telegram-accounts/{id}/test`) require a bearer token:
 
 ```
 Authorization: Bearer <ADMIN_TOKEN>
@@ -107,6 +107,12 @@ Hard requirements:
 - Idempotency:
   - do not repeat successful invites
   - per-candidate cooldown after failures/skips
+
+### Direct-message broadcasts (DM)
+
+- **Telegram ToS and spam**: mass unsolicited messaging can violate Telegram policies and local law. Use only for opted-in audiences and documented consent where required.
+- **Operator-defined `message_key`**: idempotency is keyed by `(workspace_id, message_key, tg_user_id)` for successful deliveries; do not log full message bodies in application logs (only key and length in audit meta where applicable).
+- **Suppression**: recipients in `SuppressionList` are skipped; after certain hard failures (`user_blocked`, `user_deactivated`) the service may add a suppression row to avoid repeated attempts.
 
 ### Operational safety rails
 

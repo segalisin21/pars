@@ -36,6 +36,10 @@ class TelegramClient:
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         raise NotImplementedError
 
+    def send_direct_message(self, tg_user_id: int, text: str) -> None:
+        """Send a private message to a Telegram user by numeric id (worker / Telethon)."""
+        raise NotImplementedError
+
     def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
         """Return title and participants_count when supported; None if unavailable (noop client)."""
         return None

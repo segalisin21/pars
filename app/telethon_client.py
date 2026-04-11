@@ -130,6 +130,26 @@ class TelethonTelegramClient(TelegramClient):
             except Exception:
                 pass
 
+    def send_direct_message(self, tg_user_id: int, text: str) -> None:
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+            from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Telethon is not installed") from e
+
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            client.send_message(int(tg_user_id), text)
+        except _TelethonFloodWait as e:  # pragma: no cover (network)
+            raise FloodWaitError(int(getattr(e, "seconds", 0)))
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
     def iter_users_from_messages(
         self,
         source_identifier: str,

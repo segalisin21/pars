@@ -50,6 +50,28 @@ export type InviteRun = {
   stats: Record<string, unknown>
 }
 
+export type BroadcastRun = {
+  id: number
+  status: string
+  message_key: string
+  message_body: string
+  source_ids: number[]
+  candidate_ids: number[]
+  telegram_account_id?: number | null
+  policy: Record<string, unknown>
+  started_at: string
+  finished_at: string | null
+  stats: Record<string, unknown>
+}
+
+export type BroadcastPreview = {
+  scan_total: number
+  suppressed: number
+  missing_tg_user_id: number
+  already_sent: number
+  eligible: number
+}
+
 export type TelegramAccount = {
   id: number
   label: string
@@ -309,6 +331,23 @@ export const api = {
     request<InviteRun>(`/invite-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
   cancelInviteRun: (id: number) =>
     request<InviteRun>(`/invite-runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
+
+  previewBroadcast: (payload: { message_key: string; source_ids?: number[]; candidate_ids?: number[] }) =>
+    request<BroadcastPreview>('/broadcast-runs/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  listBroadcastRuns: () => request<{ items: BroadcastRun[] }>('/broadcast-runs'),
+  getBroadcastRun: (id: number) => request<BroadcastRun>(`/broadcast-runs/${id}`),
+  startBroadcastRun: (payload: {
+    message_key: string
+    message_body: string
+    policy?: { max_per_minute?: number; max_per_hour?: number; max_total?: number | null }
+    source_ids?: number[]
+    candidate_ids?: number[]
+    telegram_account_id?: number | null
+  }) => request<BroadcastRun>('/broadcast-runs', { method: 'POST', body: JSON.stringify(payload) }),
+  resumeBroadcastRun: (id: number) =>
+    request<BroadcastRun>(`/broadcast-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
+  cancelBroadcastRun: (id: number) =>
+    request<BroadcastRun>(`/broadcast-runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
 
   telegramRequestCode: (payload: { phone: string }) =>
     request<TelegramRequestCodeOut>('/telegram/auth/request_code', { method: 'POST', body: JSON.stringify(payload) }),

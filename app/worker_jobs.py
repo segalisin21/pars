@@ -8,8 +8,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.db import Base
-from app.models import CollectRun, InviteRun, Source
-from app.services import process_collect_run, process_invite_run, refresh_source_telegram_meta
+from app.models import BroadcastRun, CollectRun, InviteRun, Source
+from app.services import (
+    process_broadcast_run,
+    process_collect_run,
+    process_invite_run,
+    refresh_source_telegram_meta,
+)
 from app.telegram_accounts_service import prepare_telegram_client_for_worker_run
 from app.telegram_client import TelegramClient
 from app.telethon_client import TelethonTelegramClient
@@ -116,6 +121,49 @@ def execute_invite_run(*, run_id: int) -> None:
                 "invite_run failed run_id=%s target_id=%s tg_client=%s",
                 run_id,
                 run.target_id,
+                _tg_client_mode(tg),
+            )
+        finally:
+            db.commit()
+    finally:
+        db.close()
+
+
+def execute_broadcast_run(*, run_id: int) -> None:
+    session_factory = get_worker_session_factory()
+    db = session_factory()
+    try:
+        run = db.get(BroadcastRun, run_id)
+        if run is None:
+            return
+        if run.status not in {"queued"}:
+            return
+        try:
+            tg, _acc = prepare_telegram_client_for_worker_run(db, run, None)
+        except Exception as e:
+            logger.exception("broadcast_run telegram client failed run_id=%s", run_id)
+            run.status = "failed"
+            run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
+            db.commit()
+            return
+
+        run.status = "running"
+        db.flush()
+
+        logger.info(
+            "broadcast_run start run_id=%s message_key=%s tg_client=%s",
+            run_id,
+            getattr(run, "message_key", ""),
+            _tg_client_mode(tg),
+        )
+        try:
+            process_broadcast_run(db, tg, run)
+        except Exception:
+            run.status = "failed"
+            logger.exception(
+                "broadcast_run failed run_id=%s message_key=%s tg_client=%s",
+                run_id,
+                getattr(run, "message_key", ""),
                 _tg_client_mode(tg),
             )
         finally:

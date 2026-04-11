@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -171,6 +171,65 @@ class InviteRun(Base):
     target: Mapped[InviteTarget] = relationship()
     workspace: Mapped[Workspace] = relationship()
     telegram_account: Mapped["TelegramAccount | None"] = relationship()
+
+
+class BroadcastRun(Base):
+    """Queued DM broadcast to workspace candidates (by sources and/or explicit ids)."""
+
+    __tablename__ = "broadcast_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    telegram_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("telegram_accounts.id"), nullable=True, index=True
+    )
+    # Operator-defined idempotency key: same key + recipient = at most one successful delivery per workspace.
+    message_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    message_body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Empty = all candidates; else filter by links to these sources (same semantics as InviteRun.source_ids).
+    source_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    # If non-empty, only these candidate row ids (must belong to workspace).
+    candidate_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
+    policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stats: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    workspace: Mapped[Workspace] = relationship()
+    telegram_account: Mapped["TelegramAccount | None"] = relationship()
+    deliveries: Mapped[list["BroadcastDelivery"]] = relationship(back_populates="broadcast_run")
+
+
+class BroadcastDelivery(Base):
+    """Per-recipient broadcast outcome; partial unique index allows one success per (workspace, message_key, tg_user_id)."""
+
+    __tablename__ = "broadcast_deliveries"
+    __table_args__ = (
+        Index(
+            "uq_broadcast_delivery_success_ws_key_tg",
+            "workspace_id",
+            "message_key",
+            "tg_user_id",
+            unique=True,
+            sqlite_where=text("status = 'success'"),
+            postgresql_where=text("status = 'success'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    broadcast_run_id: Mapped[int] = mapped_column(ForeignKey("broadcast_runs.id"), nullable=False, index=True)
+    message_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_users.id"), nullable=False, index=True)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    broadcast_run: Mapped["BroadcastRun"] = relationship(back_populates="deliveries")
+    candidate: Mapped[CandidateUser] = relationship()
+    workspace: Mapped[Workspace] = relationship()
 
 
 class InviteAttempt(Base):
