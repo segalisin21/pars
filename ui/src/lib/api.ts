@@ -72,6 +72,23 @@ export type BroadcastPreview = {
   eligible: number
 }
 
+export type BroadcastDelivery = {
+  id: number
+  broadcast_run_id: number
+  candidate_id: number
+  tg_user_id: number
+  status: string
+  error_code: string | null
+  attempted_at: string
+  username: string | null
+  display_name: string | null
+}
+
+export type BroadcastDeliveriesList = {
+  items: BroadcastDelivery[]
+  page: PageMeta
+}
+
 export type TelegramAccount = {
   id: number
   label: string
@@ -348,6 +365,20 @@ export const api = {
     request<BroadcastRun>(`/broadcast-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
   cancelBroadcastRun: (id: number) =>
     request<BroadcastRun>(`/broadcast-runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
+  listBroadcastDeliveries: (
+    runId: number,
+    params?: { limit?: number; offset?: number; status?: string; error_code?: string },
+  ) => {
+    const sp = new URLSearchParams()
+    if (params?.limit !== undefined) sp.set('limit', String(params.limit))
+    if (params?.offset !== undefined) sp.set('offset', String(params.offset))
+    if (params?.status) sp.set('status', params.status)
+    if (params?.error_code) sp.set('error_code', params.error_code)
+    const qs = sp.toString()
+    return request<BroadcastDeliveriesList>(`/broadcast-runs/${runId}/deliveries${qs ? `?${qs}` : ''}`)
+  },
+  patchBroadcastRun: (id: number, payload: { message_body: string }) =>
+    request<BroadcastRun>(`/broadcast-runs/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
   telegramRequestCode: (payload: { phone: string }) =>
     request<TelegramRequestCodeOut>('/telegram/auth/request_code', { method: 'POST', body: JSON.stringify(payload) }),

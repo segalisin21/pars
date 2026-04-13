@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { BroadcastRun, Source } from '../lib/api'
+import type { BroadcastDelivery, BroadcastPreview, BroadcastRun, Source } from '../lib/api'
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -25,15 +25,68 @@ export function BroadcastPage() {
   const [maxPerMinute, setMaxPerMinute] = useState('2')
   const [maxPerHour, setMaxPerHour] = useState('30')
   const [maxTotal, setMaxTotal] = useState('')
-  const [preview, setPreview] = useState<{ eligible: number; scan_total: number } | null>(null)
+  const [preview, setPreview] = useState<BroadcastPreview | null>(null)
   const [focusedRun, setFocusedRun] = useState<BroadcastRun | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
   const [tgAccounts, setTgAccounts] = useState<{ id: number; label: string }[] | null>(null)
   const [accountChoice, setAccountChoice] = useState('')
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
+  const [deliveries, setDeliveries] = useState<BroadcastDelivery[]>([])
+  const [deliveriesTotal, setDeliveriesTotal] = useState(0)
+  const [deliveriesOffset, setDeliveriesOffset] = useState(0)
+  const [deliveriesLoading, setDeliveriesLoading] = useState(false)
+  const [editMessageBody, setEditMessageBody] = useState('')
+  const [savingMessageRunId, setSavingMessageRunId] = useState<number | null>(null)
 
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
+
+  const accountLabel = useCallback(
+    (id: number | null | undefined) => {
+      if (id == null) return 'Авто (аккаунт выбирается при старте воркера)'
+      const a = (tgAccounts ?? []).find((x) => x.id === id)
+      return a?.label?.trim() ? a.label : `#${id}`
+    },
+    [tgAccounts],
+  )
+
+  const fetchDeliveriesPage = useCallback(async (runId: number, offset: number, append: boolean) => {
+    setDeliveriesLoading(true)
+    try {
+      const res = await api.listBroadcastDeliveries(runId, { limit: 50, offset })
+      setDeliveriesTotal(res.page.total)
+      if (append) {
+        setDeliveries((prev) => [...prev, ...res.items])
+        setDeliveriesOffset(offset + res.items.length)
+      } else {
+        setDeliveries(res.items)
+        setDeliveriesOffset(res.items.length)
+      }
+    } catch {
+      if (!append) {
+        setDeliveries([])
+        setDeliveriesTotal(0)
+        setDeliveriesOffset(0)
+      }
+    } finally {
+      setDeliveriesLoading(false)
+    }
+  }, [])
+
+  function toggleRunExpanded(r: BroadcastRun) {
+    if (expandedRunId === r.id) {
+      setExpandedRunId(null)
+      setDeliveries([])
+      setDeliveriesTotal(0)
+      setDeliveriesOffset(0)
+      setEditMessageBody('')
+      return
+    }
+    setExpandedRunId(r.id)
+    setEditMessageBody(r.message_body)
+    void fetchDeliveriesPage(r.id, 0, false)
+  }
 
   function toggleSource(id: number) {
     setSourceIds((prev) => {
@@ -129,7 +182,7 @@ export function BroadcastPage() {
         source_ids: [...sourceIds],
         candidate_ids: cids,
       })
-      setPreview({ eligible: p.eligible, scan_total: p.scan_total })
+      setPreview(p)
     } catch (e) {
       setErr(formatApiError(e).message)
     } finally {
@@ -191,6 +244,19 @@ export function BroadcastPage() {
     }
   }
 
+  async function saveRunMessage(runId: number) {
+    setErr(null)
+    setSavingMessageRunId(runId)
+    try {
+      await api.patchBroadcastRun(runId, { message_body: editMessageBody })
+      await load()
+    } catch (e) {
+      setErr(formatApiError(e).message)
+    } finally {
+      setSavingMessageRunId(null)
+    }
+  }
+
   if (sources === null || runs === null) {
     return (
       <PageLayout title="Рассылка" subtitle="Личные сообщения по контактам workspace">
@@ -212,6 +278,12 @@ export function BroadcastPage() {
           <p className="muted">
             Статус: <strong>{focusedRun.status}</strong> · ключ <code>{focusedRun.message_key}</code>
           </p>
+          <div className="label" style={{ marginTop: 10 }}>
+            Текст сообщения
+          </div>
+          <div className="mono small" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+            {focusedRun.message_body}
+          </div>
           <div className="mono small" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
             {JSON.stringify(focusedRun.stats, null, 2)}
           </div>
@@ -321,9 +393,15 @@ export function BroadcastPage() {
           </button>
         </div>
         {preview ? (
-          <p className="muted" style={{ marginTop: 10 }}>
-            Охват: в выборке {preview.scan_total}, готовы к отправке сейчас ~{preview.eligible}
-          </p>
+          <div className="muted" style={{ marginTop: 10 }}>
+            <div>
+              <strong>Охват (оценка):</strong> в выборке {preview.scan_total}, готовы к отправке сейчас {preview.eligible}
+            </div>
+            <div className="small" style={{ marginTop: 6 }}>
+              Подавлены: {preview.suppressed}, без tg_user_id: {preview.missing_tg_user_id}, уже по этому ключу:{' '}
+              {preview.already_sent}. Никнейм не нужен — важен числовой Telegram ID.
+            </div>
+          </div>
         ) : null}
         <div className="hint" style={{ marginTop: 10 }}>
           При <code>paused</code> используйте планировщик <code>python -m app.invite_scheduler</code> (обрабатывает и инвайты, и
@@ -350,31 +428,153 @@ export function BroadcastPage() {
               {runs.map((r) => {
                 const st = r.stats as Record<string, unknown>
                 const ok = typeof st.success === 'number' ? st.success : '—'
+                const expanded = expandedRunId === r.id
+                const canEditMessage = r.status === 'queued' || r.status === 'paused'
                 return (
-                  <tr key={r.id}>
-                    <td>
-                      <Link to={`/broadcast/${r.id}`}>{r.id}</Link>
-                    </td>
-                    <td>{r.status}</td>
-                    <td>
-                      <code>{r.message_key}</code>
-                    </td>
-                    <td>{ok}</td>
-                    <td>
-                      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                        {r.status === 'paused' ? (
-                          <button type="button" className="btn" disabled={actionBusyId === r.id} onClick={() => void resume(r.id)}>
-                            Возобновить
+                  <Fragment key={r.id}>
+                    <tr>
+                      <td>
+                        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ minWidth: 36, padding: '4px 8px' }}
+                            aria-expanded={expanded}
+                            title={expanded ? 'Свернуть' : 'Подробнее'}
+                            onClick={() => toggleRunExpanded(r)}
+                          >
+                            {expanded ? '▼' : '▶'}
                           </button>
-                        ) : null}
-                        {r.status === 'queued' || r.status === 'paused' ? (
-                          <button type="button" className="btn danger" disabled={actionBusyId === r.id} onClick={() => void cancel(r.id)}>
-                            Отмена
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
+                          <Link to={`/broadcast/${r.id}`}>{r.id}</Link>
+                        </div>
+                      </td>
+                      <td>{r.status}</td>
+                      <td>
+                        <code>{r.message_key}</code>
+                      </td>
+                      <td>{ok}</td>
+                      <td>
+                        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                          {r.status === 'paused' ? (
+                            <button type="button" className="btn" disabled={actionBusyId === r.id} onClick={() => void resume(r.id)}>
+                              Возобновить
+                            </button>
+                          ) : null}
+                          {r.status === 'queued' || r.status === 'paused' ? (
+                            <button type="button" className="btn danger" disabled={actionBusyId === r.id} onClick={() => void cancel(r.id)}>
+                              Отмена
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                    {expanded ? (
+                      <tr className="broadcast-run-detail">
+                        <td colSpan={5} style={{ verticalAlign: 'top', background: 'var(--card-inner-bg, rgba(0,0,0,0.04))' }}>
+                          <div style={{ padding: '12px 0' }}>
+                            <div className="label">Аккаунт отправки</div>
+                            <p className="small muted" style={{ marginTop: 4 }}>
+                              {accountLabel(r.telegram_account_id)}
+                            </p>
+                            <div className="label" style={{ marginTop: 12 }}>
+                              Текст сообщения
+                            </div>
+                            {canEditMessage ? (
+                              <>
+                                <textarea
+                                  rows={5}
+                                  value={editMessageBody}
+                                  maxLength={4096}
+                                  onChange={(e) => setEditMessageBody(e.target.value)}
+                                  disabled={savingMessageRunId === r.id}
+                                  style={{ width: '100%', marginTop: 6 }}
+                                />
+                                <div className="row" style={{ marginTop: 8, gap: 8, alignItems: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn primary"
+                                    disabled={
+                                      savingMessageRunId === r.id ||
+                                      !editMessageBody.trim() ||
+                                      editMessageBody === r.message_body
+                                    }
+                                    onClick={() => void saveRunMessage(r.id)}
+                                  >
+                                    {savingMessageRunId === r.id ? 'Сохранение…' : 'Сохранить текст'}
+                                  </button>
+                                  <span className="hint small">
+                                    Меняет только будущие отправки этого запуска; уже ушедшие в Telegram не правятся.
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <pre className="mono small" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+                                {r.message_body}
+                              </pre>
+                            )}
+                            <div className="label" style={{ marginTop: 14 }}>
+                              Исходы по получателям
+                            </div>
+                            <p className="hint small" style={{ marginTop: 4 }}>
+                              «success» = Telegram принял отправку с нашей стороны, не статус «прочитано».
+                            </p>
+                            {deliveriesLoading && deliveries.length === 0 ? (
+                              <p className="muted small">Загрузка…</p>
+                            ) : deliveries.length === 0 ? (
+                              <p className="muted small">Пока нет записей (ещё не было попыток или охват пуст).</p>
+                            ) : (
+                              <>
+                                <table className="table" style={{ marginTop: 8 }}>
+                                  <thead>
+                                    <tr>
+                                      <th>Кандидат</th>
+                                      <th>tg_user_id</th>
+                                      <th>Ник / имя</th>
+                                      <th>Статус</th>
+                                      <th>Ошибка</th>
+                                      <th>Время</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {deliveries.map((d) => (
+                                      <tr key={d.id}>
+                                        <td className="mono">{d.candidate_id}</td>
+                                        <td className="mono">{d.tg_user_id}</td>
+                                        <td className="small">
+                                          {d.username ? `@${d.username}` : '—'}
+                                          {d.display_name ? ` · ${d.display_name}` : ''}
+                                        </td>
+                                        <td>{d.status}</td>
+                                        <td className="mono small">{d.error_code ?? '—'}</td>
+                                        <td className="mono small">{d.attempted_at}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                {deliveries.length < deliveriesTotal ? (
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ marginTop: 8 }}
+                                    disabled={deliveriesLoading}
+                                    onClick={() => void fetchDeliveriesPage(r.id, deliveriesOffset, true)}
+                                  >
+                                    {deliveriesLoading ? 'Загрузка…' : `Ещё (${deliveries.length} / ${deliveriesTotal})`}
+                                  </button>
+                                ) : null}
+                              </>
+                            )}
+                            <details style={{ marginTop: 12 }}>
+                              <summary className="small muted">Статистика (stats)</summary>
+                              <pre className="mono small" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                                {JSON.stringify(r.stats, null, 2)}
+                              </pre>
+                            </details>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 )
               })}
             </tbody>

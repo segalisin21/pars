@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, BroadcastRun, CandidateUser, Source, TelegramAccount, utcnow
+from app.models import AuditEvent, BroadcastDelivery, BroadcastRun, CandidateUser, Source, TelegramAccount, utcnow
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import (
+    BroadcastDeliveriesList,
+    BroadcastDeliveryOut,
     BroadcastPreviewIn,
     BroadcastPreviewOut,
     BroadcastRunCreate,
     BroadcastRunOut,
+    BroadcastRunPatch,
     BroadcastRunsList,
+    PageMeta,
 )
 from app.services import count_broadcast_preview, process_broadcast_run, run_broadcast
 from app.telegram_client import TelegramClient
@@ -213,6 +217,110 @@ def make_broadcast_runs_router(ctx: RouteContext) -> APIRouter:
                     "error": {"code": "broadcast_run_not_found", "message": "Broadcast run not found", "details": {"id": run_id}},
                 },
             )
+        return _broadcast_run_out(run)
+
+    @router.get("/broadcast-runs/{run_id}/deliveries", response_model=BroadcastDeliveriesList)
+    def list_broadcast_deliveries(
+        run_id: int,
+        status: str | None = None,
+        error_code: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+    ):
+        run = db.get(BroadcastRun, run_id)
+        if run is None or run.workspace_id != workspace_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {"code": "broadcast_run_not_found", "message": "Broadcast run not found", "details": {"id": run_id}},
+                },
+            )
+
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+
+        stmt = (
+            select(BroadcastDelivery, CandidateUser.username, CandidateUser.display_name)
+            .outerjoin(CandidateUser, BroadcastDelivery.candidate_id == CandidateUser.id)
+            .where(
+                BroadcastDelivery.workspace_id == workspace_id,
+                BroadcastDelivery.broadcast_run_id == run_id,
+            )
+        )
+        if status:
+            stmt = stmt.where(BroadcastDelivery.status == status)
+        if error_code:
+            stmt = stmt.where(BroadcastDelivery.error_code == error_code)
+
+        rows = db.execute(stmt.order_by(BroadcastDelivery.id.desc()).limit(limit).offset(offset)).all()
+
+        count_base = select(BroadcastDelivery.id).where(
+            BroadcastDelivery.workspace_id == workspace_id,
+            BroadcastDelivery.broadcast_run_id == run_id,
+        )
+        if status:
+            count_base = count_base.where(BroadcastDelivery.status == status)
+        if error_code:
+            count_base = count_base.where(BroadcastDelivery.error_code == error_code)
+        total = db.scalar(select(func.count()).select_from(count_base.subquery())) or 0
+
+        items = [
+            BroadcastDeliveryOut(
+                id=d.id,
+                broadcast_run_id=d.broadcast_run_id,
+                candidate_id=d.candidate_id,
+                tg_user_id=int(d.tg_user_id),
+                status=d.status,
+                error_code=d.error_code,
+                attempted_at=d.attempted_at,
+                username=uname,
+                display_name=dname,
+            )
+            for d, uname, dname in rows
+        ]
+        return BroadcastDeliveriesList(items=items, page=PageMeta(limit=limit, offset=offset, total=total))
+
+    @router.patch("/broadcast-runs/{run_id}", response_model=BroadcastRunOut)
+    def patch_broadcast_run(
+        run_id: int,
+        payload: BroadcastRunPatch,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        run = db.get(BroadcastRun, run_id)
+        if run is None or run.workspace_id != workspace_id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {"code": "broadcast_run_not_found", "message": "Broadcast run not found", "details": {"id": run_id}},
+                },
+            )
+        if run.status not in {"queued", "paused"}:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": {
+                        "code": "broadcast_run_not_editable",
+                        "message": "Only queued or paused broadcast runs can update message_body",
+                        "details": {"id": run_id, "status": run.status},
+                    }
+                },
+            )
+        run.message_body = payload.message_body
+        db.add(
+            AuditEvent(
+                workspace_id=workspace_id,
+                action="broadcast.update",
+                entity_type="broadcast_run",
+                entity_id=run.id,
+                meta={"message_key": run.message_key, "message_len": len(payload.message_body)},
+            )
+        )
+        db.commit()
+        db.refresh(run)
         return _broadcast_run_out(run)
 
     @router.post("/broadcast-runs/{run_id}/resume", response_model=BroadcastRunOut, status_code=202)

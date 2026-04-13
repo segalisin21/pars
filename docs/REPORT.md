@@ -418,6 +418,43 @@ Errors:
 
 - `404` `invite_run_not_found`
 
+### Broadcast (DM рассылка)
+
+**BroadcastRun** (в ответах API): `id`, `status`, `message_key`, `message_body`, `source_ids`, `candidate_ids`, `telegram_account_id`, `policy`, `started_at`, `finished_at`, `stats`.
+
+- **`policy.max_per_minute` / `max_per_hour` (рассылка):** лимиты считаются по **каждой попытке** вызова отправки ЛС (включая ошибки и `FloodWait`), а не только по успешным доставкам — чтобы при серии сбоев воркер не долбил Telegram без паузы.
+
+- **`POST /broadcast-runs/preview`** — dry-run счётчики без отправки: `scan_total`, `suppressed`, `missing_tg_user_id`, `already_sent`, `eligible`. В **eligible** попадают кандидаты с заполненным **`tg_user_id`**; поле `username` не используется.
+- **`POST /broadcast-runs`** — создать запуск (см. код роутера; при `REDIS_URL` — `202` + RQ).
+- **`GET /broadcast-runs`**, **`GET /broadcast-runs/{id}`** — список и деталь (включая `message_body`).
+
+#### `GET /broadcast-runs/{id}/deliveries`
+
+Постраничная выдача исходов по получателям (`broadcast_deliveries`). Query: `limit` (1…200, default 50), `offset`, опционально `status`, `error_code`.
+
+Ответ: `{ "items": [ { "id", "broadcast_run_id", "candidate_id", "tg_user_id", "status", "error_code", "attempted_at", "username", "display_name" } ], "page": { "limit", "offset", "total" } }`.
+
+**Семантика `status`:** `success` означает, что **Telegram API принял отправку** с нашей стороны; подтверждения «прочитано» в v1 нет.
+
+Ошибки: `404` `broadcast_run_not_found`.
+
+#### `PATCH /broadcast-runs/{id}`
+
+Требует `Authorization: Bearer` при установленном `ADMIN_TOKEN`.
+
+Тело: `{ "message_body": "…" }` (1…4096 символов). Разрешено **только** для `status` ∈ `queued` | `paused` — обновляет текст для **следующих** итераций воркера; уже отправленные сообщения в Telegram не меняются.
+
+Ошибки:
+
+- `404` `broadcast_run_not_found`
+- `409` `broadcast_run_not_editable` — другой статус (например `succeeded`, `running`)
+
+Audit: `broadcast.update` с `message_key`, `message_len` (без текста сообщения).
+
+#### `POST /broadcast-runs/{id}/resume` / `cancel`
+
+См. роутер [`app/routers/broadcast_runs.py`](../app/routers/broadcast_runs.py).
+
 ### Telegram accounts (global pool)
 
 > **Security:** all endpoints require `ADMIN_TOKEN`. Session strings are stored **encrypted at rest** using `APP_ENCRYPTION_KEY` (Fernet). Never log session contents.
@@ -481,6 +518,8 @@ If account has 2FA enabled, response error may be `"NEEDS_PASSWORD"`.
 - `target_not_found`
 - `collect_run_not_found`
 - `invite_run_not_found`
+- `broadcast_run_not_found`
+- `broadcast_run_not_editable`
 
 ### Telegram-normalized attempt error codes (stored in DB)
 - `flood_wait`

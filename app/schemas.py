@@ -268,6 +268,26 @@ class BroadcastRunsList(BaseModel):
     items: list[BroadcastRunOut]
 
 
+class BroadcastRunPatch(BaseModel):
+    message_body: str = Field(min_length=1, max_length=4096)
+
+
+class BroadcastDeliveryOut(BaseModel):
+    id: int
+    broadcast_run_id: int
+    candidate_id: int
+    tg_user_id: int
+    status: str
+    error_code: str | None
+    attempted_at: datetime
+    username: str | None = None
+    display_name: str | None = None
+
+    @field_serializer("attempted_at")
+    def _serialize_attempted_at(self, v: datetime):
+        return iso_utc_z(v)
+
+
 class TelegramRequestCodeIn(BaseModel):
     phone: str = Field(min_length=3, max_length=32)
 
@@ -329,6 +349,11 @@ class PageMeta(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+class BroadcastDeliveriesList(BaseModel):
+    items: list[BroadcastDeliveryOut]
+    page: PageMeta
 
 
 class SourceRefOut(BaseModel):

@@ -1,5 +1,51 @@
 # Handoff
 
+## 2026-04-13 (broadcast pacing)
+
+### What changed
+
+- **Broadcast pacing:** `max_per_minute` / `max_per_hour` в `process_broadcast_run` считают **попытки** `send_direct_message` (любой исход), а не только успешные отправки; при `pacing_limit` пауза до следующего окна как раньше. Счётчик `stats.attempted` увеличивается только непосредственно перед вызовом отправки (если пауза по лимиту — без лишнего +1 за кандидата, по которому Telegram не вызывали).
+- Документация: `docs/REPORT.md` — уточнение по лимитам рассылки.
+- Тест: `tests/test_broadcast.py::test_broadcast_pacing_counts_failed_send_attempts`.
+
+### Key files
+
+- `app/services.py`, `tests/test_broadcast.py`, `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Логика **invite** по-прежнему может отличаться (там отдельный цикл с `sent_in_min`); менялась только ветка broadcast.
+
+## 2026-04-13
+
+### What changed
+
+- Broadcast API: `GET /broadcast-runs/{id}/deliveries` (пагинация, join кандидата для `username`/`display_name`); `PATCH /broadcast-runs/{id}` для `message_body` только в `queued`/`paused` + audit `broadcast.update`.
+- UI «Рассылка»: раскрытие строки истории — текст, аккаунт, таблица доставок («ещё»), подсказка по `success`; редактирование текста для активных запусков; полный вывод счётчиков «Оценить охват»; на странице запуска по `/broadcast/:id` показ `message_body`.
+- Документация: `docs/REPORT.md` — секция Broadcast и коды ошибок.
+
+### Key files
+
+- `app/schemas.py`, `app/routers/broadcast_runs.py`
+- `ui/src/pages/BroadcastPage.tsx`, `ui/src/lib/api.ts`
+- `tests/test_broadcast.py`, `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- `PATCH` требует admin token в проде; `success` в доставках — не read receipt.
+
 ## 2026-04-10
 
 ### What changed

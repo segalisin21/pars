@@ -1150,8 +1150,9 @@ def process_broadcast_run(
 
     window_min_start = monotonic()
     window_hour_start = monotonic()
-    sent_in_min = 0
-    sent_in_hour = 0
+    # Pacing: max_per_minute / max_per_hour count Telegram send attempts (any outcome), not only successes.
+    attempts_in_min = 0
+    attempts_in_hour = 0
 
     now = utcnow()
     body = run.message_body if isinstance(run.message_body, str) else ""
@@ -1206,20 +1207,18 @@ def process_broadcast_run(
             )
             continue
 
-        attempted += 1
-
         try:
             now_m = monotonic()
             if now_m - window_min_start >= 60:
                 window_min_start = now_m
-                sent_in_min = 0
+                attempts_in_min = 0
             if now_m - window_hour_start >= 3600:
                 window_hour_start = now_m
-                sent_in_hour = 0
-            if sent_in_min >= max_per_minute or sent_in_hour >= max_per_hour:
+                attempts_in_hour = 0
+            if attempts_in_min >= max_per_minute or attempts_in_hour >= max_per_hour:
                 next_eligible_at = _compute_next_eligible_at_pacing(
-                    sent_in_min=sent_in_min,
-                    sent_in_hour=sent_in_hour,
+                    sent_in_min=attempts_in_min,
+                    sent_in_hour=attempts_in_hour,
                     max_per_minute=max_per_minute,
                     max_per_hour=max_per_hour,
                     window_min_start=window_min_start,
@@ -1242,7 +1241,10 @@ def process_broadcast_run(
                 db.flush()
                 return run
 
+            attempted += 1
             tg_client.send_direct_message(tgid, body)
+            attempts_in_min += 1
+            attempts_in_hour += 1
             try:
                 with db.begin_nested():
                     db.add(
@@ -1262,9 +1264,9 @@ def process_broadcast_run(
                 skipped_duplicate += 1
             else:
                 success += 1
-                sent_in_min += 1
-                sent_in_hour += 1
         except FloodWaitError as e:
+            attempts_in_min += 1
+            attempts_in_hour += 1
             failed += 1
             code = "flood_wait"
             _merge_failed_by_code(failed_by_code, code)
@@ -1301,6 +1303,8 @@ def process_broadcast_run(
             db.flush()
             return run
         except Exception as e:
+            attempts_in_min += 1
+            attempts_in_hour += 1
             failed += 1
             code = _classify_dm_error(e)
             _merge_failed_by_code(failed_by_code, code)
