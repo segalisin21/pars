@@ -1,5 +1,29 @@
 # Handoff
 
+## 2026-04-13 (broadcast DM by username / policy.dm_recipient)
+
+### What changed
+
+- Рассылка: в **`policy.dm_recipient`** выбирается способ адресации — **`tg_user_id`** (по умолчанию) или **`username`**. Режим username: `send_message` по нормализованному username; кандидаты без username пропускаются; числовой id в доставках — из БД или из ответа Telethon; дедуп без `tg_user_id` у кандидата — по `candidate_id` + успешная доставка.
+- API: `BroadcastPolicy.dm_recipient`, `BroadcastPreviewIn.dm_recipient`, `BroadcastPreviewOut.missing_username`; превью и запуск согласованы по полю.
+- `TelegramClient.send_direct_message(text, *, tg_user_id=…|username=…)`, `verify_direct_message_outbox(message_id, *, …)`; `DirectMessageSendResult.resolved_tg_user_id`.
+- UI: страница рассылки — переключатель «по Telegram ID / по @username», поля в preview и policy.
+
+### Key files
+
+- `app/schemas.py`, `app/services.py`, `app/telegram_client.py`, `app/telethon_client.py`, `app/main.py`, `app/routers/broadcast_runs.py`, `tests/conftest.py`, `tests/test_broadcast.py`, `ui/src/pages/BroadcastPage.tsx`, `ui/src/lib/api.ts`, `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Username в БД может устареть относительно Telegram; режим username зависит от актуальности поля.
+- Строки с `missing_resolved_tg_user_id` могут иметь `tg_user_id=0` в БД (крайний случай).
+
 ## 2026-04-13 (broadcast DM verification)
 
 ### What changed

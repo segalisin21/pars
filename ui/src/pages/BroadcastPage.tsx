@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { BroadcastDelivery, BroadcastPreview, BroadcastRun, Source } from '../lib/api'
+import type { BroadcastDelivery, BroadcastPreview, BroadcastRun, DmRecipient, Source } from '../lib/api'
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -25,6 +25,7 @@ export function BroadcastPage() {
   const [maxPerMinute, setMaxPerMinute] = useState('2')
   const [maxPerHour, setMaxPerHour] = useState('30')
   const [maxTotal, setMaxTotal] = useState('')
+  const [dmRecipient, setDmRecipient] = useState<DmRecipient>('tg_user_id')
   const [preview, setPreview] = useState<BroadcastPreview | null>(null)
   const [focusedRun, setFocusedRun] = useState<BroadcastRun | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -181,6 +182,7 @@ export function BroadcastPage() {
         message_key: messageKey.trim(),
         source_ids: [...sourceIds],
         candidate_ids: cids,
+        dm_recipient: dmRecipient,
       })
       setPreview(p)
     } catch (e) {
@@ -200,6 +202,7 @@ export function BroadcastPage() {
         max_per_minute: Number(maxPerMinute) || 2,
         max_per_hour: Number(maxPerHour) || 30,
         max_total: mx !== undefined && Number.isFinite(mx) && mx > 0 ? mx : null,
+        dm_recipient: dmRecipient,
       }
       const acc = accountChoice === '' ? null : Number(accountChoice)
       await api.startBroadcastRun({
@@ -372,6 +375,32 @@ export function BroadcastPage() {
               style={{ width: 120 }}
             />
           </label>
+          <fieldset className="field" disabled={busy} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="label">Кому отправлять</div>
+            <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
+              <label className="row" style={{ gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="dmRecipient"
+                  checked={dmRecipient === 'tg_user_id'}
+                  onChange={() => setDmRecipient('tg_user_id')}
+                />
+                по Telegram ID
+              </label>
+              <label className="row" style={{ gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="dmRecipient"
+                  checked={dmRecipient === 'username'}
+                  onChange={() => setDmRecipient('username')}
+                />
+                по @username
+              </label>
+            </div>
+            <div className="small muted" style={{ marginTop: 6 }}>
+              В режиме username кандидаты без username не попадают в отправку.
+            </div>
+          </fieldset>
           {tgAccounts && tgAccounts.length > 0 ? (
             <label className="field">
               <div className="label">Telegram аккаунт</div>
@@ -398,8 +427,20 @@ export function BroadcastPage() {
               <strong>Охват (оценка):</strong> в выборке {preview.scan_total}, готовы к отправке сейчас {preview.eligible}
             </div>
             <div className="small" style={{ marginTop: 6 }}>
-              Подавлены: {preview.suppressed}, без tg_user_id: {preview.missing_tg_user_id}, уже по этому ключу:{' '}
-              {preview.already_sent}. Никнейм не нужен — важен числовой Telegram ID.
+              Подавлены: {preview.suppressed}
+              {dmRecipient === 'tg_user_id' ? (
+                <>
+                  , без Telegram ID: {preview.missing_tg_user_id}
+                </>
+              ) : (
+                <>
+                  , без username: {preview.missing_username}
+                </>
+              )}
+              , уже по этому ключу: {preview.already_sent}.
+              {dmRecipient === 'tg_user_id'
+                ? ' Нужен числовой tg_user_id у кандидата.'
+                : ' Нужен заполненный username; числовой ID подставится из ответа Telegram после отправки.'}
             </div>
           </div>
         ) : null}

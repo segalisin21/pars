@@ -43,6 +43,36 @@ def _normalize_identifier(identifier: str) -> str:
     return s
 
 
+def _resolved_user_id_from_message(msg) -> int | None:
+    """Best-effort numeric peer user id from a Telethon Message (private chat)."""
+    if msg is None:
+        return None
+    try:
+        from telethon.tl.types import PeerUser  # type: ignore
+    except Exception:
+        PeerUser = None  # type: ignore[misc, assignment]
+    if PeerUser is not None:
+        pid = getattr(msg, "peer_id", None)
+        if isinstance(pid, PeerUser):
+            return int(pid.user_id)
+        to_id = getattr(msg, "to_id", None)
+        if isinstance(to_id, PeerUser):
+            return int(to_id.user_id)
+    uid = getattr(getattr(msg, "peer_id", None), "user_id", None)
+    if uid is not None:
+        try:
+            return int(uid)
+        except (TypeError, ValueError):
+            pass
+    uid2 = getattr(getattr(msg, "to_id", None), "user_id", None)
+    if uid2 is not None:
+        try:
+            return int(uid2)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 class TelethonTelegramClient(TelegramClient):
     """
     Minimal synchronous adapter over Telethon.
@@ -139,7 +169,15 @@ class TelethonTelegramClient(TelegramClient):
     def supports_outbox_verify(self) -> bool:  # noqa: D102
         return True
 
-    def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
+    def send_direct_message(
+        self,
+        text: str,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> DirectMessageSendResult:
+        if (tg_user_id is None) == (username is None):
+            raise ValueError("send_direct_message requires exactly one of tg_user_id or username")
         try:
             from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
             from telethon.sessions import StringSession  # type: ignore
@@ -147,13 +185,15 @@ class TelethonTelegramClient(TelegramClient):
         except Exception as e:  # pragma: no cover
             raise RuntimeError("Telethon is not installed") from e
 
+        target: int | str = int(tg_user_id) if tg_user_id is not None else _normalize_identifier(username or "")
         client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
         try:
             client.connect()
-            msg = client.send_message(int(tg_user_id), text)
+            msg = client.send_message(target, text)
             mid = int(getattr(msg, "id", 0) or 0) or None
             out = bool(getattr(msg, "out", True))
-            return DirectMessageSendResult(message_id=mid, out=out)
+            resolved = _resolved_user_id_from_message(msg) if username is not None else None
+            return DirectMessageSendResult(message_id=mid, out=out, resolved_tg_user_id=resolved)
         except _TelethonFloodWait as e:  # pragma: no cover (network)
             raise FloodWaitError(int(getattr(e, "seconds", 0)))
         finally:
@@ -162,7 +202,15 @@ class TelethonTelegramClient(TelegramClient):
             except Exception:
                 pass
 
-    def verify_direct_message_outbox(self, tg_user_id: int, message_id: int) -> bool:
+    def verify_direct_message_outbox(
+        self,
+        message_id: int,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> bool:
+        if (tg_user_id is None) == (username is None):
+            raise ValueError("verify_direct_message_outbox requires exactly one of tg_user_id or username")
         try:
             from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
             from telethon.sessions import StringSession  # type: ignore
@@ -170,10 +218,11 @@ class TelethonTelegramClient(TelegramClient):
         except Exception as e:  # pragma: no cover
             raise RuntimeError("Telethon is not installed") from e
 
+        peer: int | str = int(tg_user_id) if tg_user_id is not None else _normalize_identifier(username or "")
         client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
         try:
             client.connect()
-            raw = client.get_messages(int(tg_user_id), ids=int(message_id))
+            raw = client.get_messages(peer, ids=int(message_id))
             if raw is None:
                 return False
             # ids=int returns a single Message; ids=list returns TotalList (subclass of list).

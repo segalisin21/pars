@@ -25,7 +25,8 @@ def _app_encryption_key_autouse():
 class FakeTelegramClient(TelegramClient):
     def __init__(self):
         self.invite_calls: list[tuple[str, int]] = []
-        self.dm_calls: list[tuple[int, str]] = []
+        # (kind, peer, text) kind is "tg_user_id" | "username"
+        self.dm_calls: list[tuple[str, int | str, str]] = []
         self._dm_message_seq = 0
         self.outbox_verify_fail_message_ids: set[int] = set()
         self.participants_by_source: dict[str, list[TgUser]] = {}
@@ -54,15 +55,40 @@ class FakeTelegramClient(TelegramClient):
     def supports_outbox_verify(self) -> bool:
         return True
 
-    def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
-        self.dm_calls.append((tg_user_id, text))
-        if tg_user_id in self.flood_on_user_ids:
-            raise FloodWaitError(60)
+    def send_direct_message(
+        self,
+        text: str,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> DirectMessageSendResult:
+        if (tg_user_id is None) == (username is None):
+            raise ValueError("send_direct_message requires exactly one of tg_user_id or username")
+        if tg_user_id is not None:
+            self.dm_calls.append(("tg_user_id", int(tg_user_id), text))
+            if int(tg_user_id) in self.flood_on_user_ids:
+                raise FloodWaitError(60)
+            self._dm_message_seq += 1
+            return DirectMessageSendResult(message_id=self._dm_message_seq, out=True)
+        un = str(username or "")
+        self.dm_calls.append(("username", un, text))
         self._dm_message_seq += 1
-        return DirectMessageSendResult(message_id=self._dm_message_seq, out=True)
+        resolved = 888_000_000 + (abs(hash(un)) % 99_999_999)
+        return DirectMessageSendResult(
+            message_id=self._dm_message_seq,
+            out=True,
+            resolved_tg_user_id=resolved,
+        )
 
-    def verify_direct_message_outbox(self, tg_user_id: int, message_id: int) -> bool:
+    def verify_direct_message_outbox(
+        self,
+        message_id: int,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> bool:
         _ = tg_user_id
+        _ = username
         return int(message_id) not in self.outbox_verify_fail_message_ids
 
     def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:

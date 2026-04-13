@@ -144,7 +144,9 @@ def test_process_broadcast_sends_dm(session_factory, fake_tg):
 
     assert run.status == "succeeded"
     assert len(fake_tg.dm_calls) == 2
-    assert fake_tg.dm_calls[0][1] == "hello"
+    assert fake_tg.dm_calls[0][0] == "tg_user_id"
+    assert fake_tg.dm_calls[0][1] == 501
+    assert fake_tg.dm_calls[0][2] == "hello"
     assert int(run.stats.get("success", 0)) == 2
     rows = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).all()
     assert {r.telegram_message_id for r in rows} == {1, 2}
@@ -206,8 +208,16 @@ def test_broadcast_pacing_counts_failed_send_attempts(session_factory, fake_tg, 
         db.add(CandidateUser(workspace_id=1, tg_user_id=uid, username=f"u{uid}", display_name=None))
     db.commit()
 
-    def _always_fail(tg_user_id: int, text: str) -> None:
-        fake_tg.dm_calls.append((tg_user_id, text))
+    def _always_fail(
+        text: str,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> None:
+        if tg_user_id is not None:
+            fake_tg.dm_calls.append(("tg_user_id", int(tg_user_id), text))
+        else:
+            fake_tg.dm_calls.append(("username", str(username or ""), text))
         raise RuntimeError("simulated send failure")
 
     monkeypatch.setattr(fake_tg, "send_direct_message", _always_fail)
@@ -323,6 +333,7 @@ def test_broadcast_preview_endpoint(client, session_factory):
     body = r.json()
     assert body["scan_total"] == 1
     assert body["eligible"] == 1
+    assert body["missing_username"] == 0
     db.close()
 
 
@@ -341,6 +352,128 @@ def test_broadcast_preview_eligible_without_username(client, session_factory):
     body = r.json()
     assert body["eligible"] == 1
     assert body["missing_tg_user_id"] == 0
+    assert body["missing_username"] == 0
+    db.close()
+
+
+def test_process_broadcast_username_mode_uses_username_peer(session_factory, fake_tg):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=55_001, username="SomeUser", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="un_mode",
+        message_body="hi",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "dm_recipient": "username"},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    db.refresh(run)
+    assert run.status == "succeeded"
+    assert len(fake_tg.dm_calls) == 1
+    assert fake_tg.dm_calls[0][0] == "username"
+    assert fake_tg.dm_calls[0][1] == "someuser"
+    assert fake_tg.dm_calls[0][2] == "hi"
+    row = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).one()
+    assert row.status == "success"
+    assert row.tg_user_id == 55_001
+    db.close()
+
+
+def test_process_broadcast_username_mode_skips_without_username(session_factory, fake_tg):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=55_002, username=None, display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="no_un",
+        message_body="x",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "dm_recipient": "username"},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    db.refresh(run)
+    assert fake_tg.dm_calls == []
+    assert int(run.stats.get("skipped", 0)) >= 1
+    db.close()
+
+
+def test_broadcast_preview_username_mode_counts_missing_username(client, session_factory):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=803, username=None, display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    r = client.post(
+        "/broadcast-runs/preview",
+        json={"message_key": "pv_un", "source_ids": [], "candidate_ids": [c.id], "dm_recipient": "username"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["missing_username"] == 1
+    assert body["eligible"] == 0
+    assert body["missing_tg_user_id"] == 0
+    db.close()
+
+
+def test_broadcast_duplicate_when_no_tg_user_id_uses_candidate(session_factory, fake_tg):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=None, username="onlyname", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run1 = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="cid_dup",
+        message_body="m1",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "dm_recipient": "username"},
+        stats={},
+    )
+    db.add(run1)
+    db.commit()
+    db.refresh(run1)
+    process_broadcast_run(db, fake_tg, run1)
+    db.commit()
+    fake_tg.dm_calls.clear()
+    run2 = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="cid_dup",
+        message_body="m2",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "dm_recipient": "username"},
+        stats={},
+    )
+    db.add(run2)
+    db.commit()
+    db.refresh(run2)
+    process_broadcast_run(db, fake_tg, run2)
+    db.commit()
+    db.refresh(run2)
+    assert fake_tg.dm_calls == []
+    assert int(run2.stats.get("skipped_duplicate", 0)) >= 1
     db.close()
 
 

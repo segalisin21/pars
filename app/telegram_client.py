@@ -26,10 +26,14 @@ class DirectMessageSendResult:
 
     ``message_id`` is the cloud chat message id when the implementation returns it (e.g. Telethon);
     ``None`` if unavailable. This does not imply the recipient read the message.
+
+    When the send used a username peer, ``resolved_tg_user_id`` may contain the numeric user id
+    from the API response (for storage in ``BroadcastDelivery``).
     """
 
     message_id: int | None = None
     out: bool = True
+    resolved_tg_user_id: int | None = None
 
 
 class FloodWaitError(Exception):
@@ -48,16 +52,28 @@ class TelegramClient:
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         raise NotImplementedError
 
-    def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
-        """Send a private message to a Telegram user by numeric id (worker / Telethon)."""
+    def send_direct_message(
+        self,
+        text: str,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> DirectMessageSendResult:
+        """Send a private DM; specify exactly one of ``tg_user_id`` or ``username`` (no @)."""
         raise NotImplementedError
 
     def supports_outbox_verify(self) -> bool:
         """Whether ``verify_direct_message_outbox`` can run a meaningful check (second MTProto round-trip)."""
         return False
 
-    def verify_direct_message_outbox(self, tg_user_id: int, message_id: int) -> bool:
-        """Re-fetch message by id in the private chat with ``tg_user_id``; True if outgoing message exists.
+    def verify_direct_message_outbox(
+        self,
+        message_id: int,
+        *,
+        tg_user_id: int | None = None,
+        username: str | None = None,
+    ) -> bool:
+        """Re-fetch message by id in the private chat; specify exactly one of ``tg_user_id`` or ``username``.
 
         Default: unsupported (returns False). Telethon implementation overrides.
         """

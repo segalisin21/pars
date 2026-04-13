@@ -80,6 +80,7 @@ def make_broadcast_runs_router(ctx: RouteContext) -> APIRouter:
             message_key=payload.message_key.strip(),
             source_ids=payload.source_ids,
             candidate_ids=payload.candidate_ids,
+            dm_recipient=payload.dm_recipient,
         )
         return BroadcastPreviewOut(**counts)
 

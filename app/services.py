@@ -969,6 +969,36 @@ def _broadcast_already_sent(db: Session, workspace_id: int, message_key: str, tg
     return bool(n and n > 0)
 
 
+def _broadcast_dm_recipient_mode(policy: dict) -> str:
+    raw = policy.get("dm_recipient") if isinstance(policy, dict) else None
+    if raw == "username":
+        return "username"
+    return "tg_user_id"
+
+
+def _broadcast_already_sent_for_candidate(db: Session, workspace_id: int, message_key: str, candidate_id: int) -> bool:
+    n = db.scalar(
+        select(func.count(BroadcastDelivery.id)).where(
+            BroadcastDelivery.workspace_id == workspace_id,
+            BroadcastDelivery.message_key == message_key,
+            BroadcastDelivery.candidate_id == candidate_id,
+            BroadcastDelivery.status == "success",
+        )
+    )
+    return bool(n and n > 0)
+
+
+def _broadcast_duplicate_for_message_key(db: Session, workspace_id: int, message_key: str, cand: CandidateUser) -> bool:
+    if cand.tg_user_id is not None:
+        return _broadcast_already_sent(db, workspace_id, message_key, int(cand.tg_user_id))
+    return _broadcast_already_sent_for_candidate(db, workspace_id, message_key, cand.id)
+
+
+def _broadcast_row_tg_user_id(cand: CandidateUser) -> int:
+    """Fallback numeric id for delivery rows when candidate has no tg_user_id (skipped / edge cases)."""
+    return int(cand.tg_user_id) if cand.tg_user_id is not None else 0
+
+
 def _classify_dm_error(exc: BaseException) -> str:
     if isinstance(exc, FloodWaitError):
         return "flood_wait"
@@ -1019,10 +1049,12 @@ def count_broadcast_preview(
     message_key: str,
     source_ids: list[int],
     candidate_ids: list[int],
+    dm_recipient: str = "tg_user_id",
 ) -> dict[str, int]:
     """Dry-run counts without creating a run (no Telegram calls)."""
     sids = sorted(set(source_ids))
     cids = sorted(set(candidate_ids))
+    mode = "username" if dm_recipient == "username" else "tg_user_id"
     stmt = _broadcast_candidate_stmt(
         workspace_id=workspace_id,
         source_ids=sids,
@@ -1034,16 +1066,22 @@ def count_broadcast_preview(
     scan_total = len(candidates)
     suppressed_n = 0
     missing_id_n = 0
+    missing_username_n = 0
     already_sent_n = 0
     eligible_n = 0
     for cand in candidates:
         if is_suppressed(db, workspace_id, cand, now):
             suppressed_n += 1
             continue
-        if cand.tg_user_id is None:
-            missing_id_n += 1
-            continue
-        if _broadcast_already_sent(db, workspace_id, message_key, int(cand.tg_user_id)):
+        if mode == "tg_user_id":
+            if cand.tg_user_id is None:
+                missing_id_n += 1
+                continue
+        else:
+            if normalize_username(cand.username) is None:
+                missing_username_n += 1
+                continue
+        if _broadcast_duplicate_for_message_key(db, workspace_id, message_key, cand):
             already_sent_n += 1
             continue
         eligible_n += 1
@@ -1051,6 +1089,7 @@ def count_broadcast_preview(
         "scan_total": scan_total,
         "suppressed": suppressed_n,
         "missing_tg_user_id": missing_id_n,
+        "missing_username": missing_username_n,
         "already_sent": already_sent_n,
         "eligible": eligible_n,
     }
@@ -1087,6 +1126,7 @@ def process_broadcast_run(
     max_per_minute = int(policy.get("max_per_minute", 2))
     max_per_hour = int(policy.get("max_per_hour", 30))
     verify_outbox_after_send = bool(policy.get("verify_outbox_after_send"))
+    dm_mode = _broadcast_dm_recipient_mode(policy)
     max_total: int | None = None
     raw_cap = policy.get("max_total")
     if raw_cap is not None:
@@ -1194,12 +1234,16 @@ def process_broadcast_run(
 
         last_candidate_id = cand.id
 
-        if cand.tg_user_id is None:
+        if dm_mode == "tg_user_id":
+            if cand.tg_user_id is None:
+                skipped += 1
+                continue
+        elif normalize_username(cand.username) is None:
             skipped += 1
             continue
 
-        tgid = int(cand.tg_user_id)
-        if _broadcast_already_sent(db, workspace_id, message_key, tgid):
+        row_tgid = _broadcast_row_tg_user_id(cand)
+        if _broadcast_duplicate_for_message_key(db, workspace_id, message_key, cand):
             skipped_duplicate += 1
             db.add(
                 BroadcastDelivery(
@@ -1207,13 +1251,16 @@ def process_broadcast_run(
                     broadcast_run_id=run.id,
                     message_key=message_key,
                     candidate_id=cand.id,
-                    tg_user_id=tgid,
+                    tg_user_id=row_tgid,
                     status="skipped",
                     error_code="already_sent",
                     attempted_at=utcnow(),
                 )
             )
             continue
+
+        uname = normalize_username(cand.username) if dm_mode == "username" else None
+        db_tgid = row_tgid
 
         try:
             now_m = monotonic()
@@ -1250,9 +1297,37 @@ def process_broadcast_run(
                 return run
 
             attempted += 1
-            send_result = tg_client.send_direct_message(tgid, body)
+            if dm_mode == "username":
+                assert uname is not None
+                send_result = tg_client.send_direct_message(body, username=uname)
+            else:
+                send_result = tg_client.send_direct_message(body, tg_user_id=int(cand.tg_user_id))
             attempts_in_min += 1
             attempts_in_hour += 1
+
+            tgid: int | None
+            if cand.tg_user_id is not None:
+                tgid = int(cand.tg_user_id)
+            else:
+                tgid = send_result.resolved_tg_user_id
+            if tgid is None:
+                failed += 1
+                _merge_failed_by_code(failed_by_code, "missing_resolved_tg_user_id")
+                db.add(
+                    BroadcastDelivery(
+                        workspace_id=workspace_id,
+                        broadcast_run_id=run.id,
+                        message_key=message_key,
+                        candidate_id=cand.id,
+                        tg_user_id=0,
+                        status="failed",
+                        error_code="missing_resolved_tg_user_id",
+                        attempted_at=utcnow(),
+                    )
+                )
+                continue
+            tgid = int(tgid)
+            db_tgid = tgid
 
             tg_mid = send_result.message_id
             if verify_outbox_after_send and tg_client.supports_outbox_verify():
@@ -1274,7 +1349,7 @@ def process_broadcast_run(
                     )
                     continue
                 try:
-                    in_outbox = tg_client.verify_direct_message_outbox(tgid, int(tg_mid))
+                    in_outbox = tg_client.verify_direct_message_outbox(int(tg_mid), tg_user_id=tgid)
                 except FloodWaitError as e:
                     attempts_in_min += 1
                     attempts_in_hour += 1
@@ -1383,7 +1458,7 @@ def process_broadcast_run(
                     broadcast_run_id=run.id,
                     message_key=message_key,
                     candidate_id=cand.id,
-                    tg_user_id=tgid,
+                    tg_user_id=db_tgid,
                     status="failed",
                     error_code=code,
                     attempted_at=utcnow(),
@@ -1421,7 +1496,7 @@ def process_broadcast_run(
                     broadcast_run_id=run.id,
                     message_key=message_key,
                     candidate_id=cand.id,
-                    tg_user_id=tgid,
+                    tg_user_id=db_tgid,
                     status="failed",
                     error_code=code,
                     attempted_at=utcnow(),

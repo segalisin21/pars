@@ -22,6 +22,9 @@ class ErrorEnvelope(BaseModel):
 
 CollectMode = Literal["participants", "messages", "both", "auto"]
 
+# How broadcast DMs resolve the Telegram peer (stored on BroadcastRun.policy).
+DmRecipient = Literal["tg_user_id", "username"]
+
 
 class SourceCreate(BaseModel):
     type: Literal["group", "chat", "channel"]
@@ -173,6 +176,7 @@ class BroadcastPolicy(BaseModel):
     max_per_minute: int = Field(default=2, ge=1, le=60)
     max_per_hour: int = Field(default=30, ge=1, le=10000)
     max_total: int | None = Field(default=None)
+    dm_recipient: DmRecipient = "tg_user_id"
 
     @field_validator("max_total")
     @classmethod
@@ -218,6 +222,7 @@ class BroadcastPreviewIn(BaseModel):
     message_key: str = Field(min_length=1, max_length=128)
     source_ids: list[int] = Field(default_factory=list, max_length=50)
     candidate_ids: list[int] = Field(default_factory=list, max_length=5000)
+    dm_recipient: DmRecipient = "tg_user_id"
 
     @field_validator("message_key")
     @classmethod
@@ -242,6 +247,7 @@ class BroadcastPreviewOut(BaseModel):
     scan_total: int
     suppressed: int
     missing_tg_user_id: int
+    missing_username: int
     already_sent: int
     eligible: int
 

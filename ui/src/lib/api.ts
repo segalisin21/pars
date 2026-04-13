@@ -64,10 +64,13 @@ export type BroadcastRun = {
   stats: Record<string, unknown>
 }
 
+export type DmRecipient = 'tg_user_id' | 'username'
+
 export type BroadcastPreview = {
   scan_total: number
   suppressed: number
   missing_tg_user_id: number
+  missing_username: number
   already_sent: number
   eligible: number
 }
@@ -351,14 +354,23 @@ export const api = {
   cancelInviteRun: (id: number) =>
     request<InviteRun>(`/invite-runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
 
-  previewBroadcast: (payload: { message_key: string; source_ids?: number[]; candidate_ids?: number[] }) =>
-    request<BroadcastPreview>('/broadcast-runs/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  previewBroadcast: (payload: {
+    message_key: string
+    source_ids?: number[]
+    candidate_ids?: number[]
+    dm_recipient?: DmRecipient
+  }) => request<BroadcastPreview>('/broadcast-runs/preview', { method: 'POST', body: JSON.stringify(payload) }),
   listBroadcastRuns: () => request<{ items: BroadcastRun[] }>('/broadcast-runs'),
   getBroadcastRun: (id: number) => request<BroadcastRun>(`/broadcast-runs/${id}`),
   startBroadcastRun: (payload: {
     message_key: string
     message_body: string
-    policy?: { max_per_minute?: number; max_per_hour?: number; max_total?: number | null }
+    policy?: {
+      max_per_minute?: number
+      max_per_hour?: number
+      max_total?: number | null
+      dm_recipient?: DmRecipient
+    }
     source_ids?: number[]
     candidate_ids?: number[]
     telegram_account_id?: number | null
