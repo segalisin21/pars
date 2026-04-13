@@ -424,6 +424,8 @@ Errors:
 
 - **`policy.max_per_minute` / `max_per_hour` (рассылка):** лимиты считаются по **каждой попытке** вызова отправки ЛС (включая ошибки и `FloodWait`), а не только по успешным доставкам — чтобы при серии сбоев воркер не долбил Telegram без паузы.
 
+- **`policy.verify_outbox_after_send` (optional, bool):** если `true` и клиент поддерживает проверку (реализация Telethon в воркере), после успешного `send_message` выполняется второй запрос `get_messages` по тому же peer и сохранённому **cloud `message_id`**, чтобы убедиться, что исходящее сообщение видно в outbox аккаунта. Это **не** «прочитано получателем», только согласованность с сервером Telegram. Если клиент не поддерживает (например noop в тестах), флаг игнорируется. Дополнительные коды ошибок доставки: `no_telegram_message_id` (нет id после send), `outbox_verify_failed` (повторное чтение не нашло исходящее сообщение).
+
 - **`POST /broadcast-runs/preview`** — dry-run счётчики без отправки: `scan_total`, `suppressed`, `missing_tg_user_id`, `already_sent`, `eligible`. В **eligible** попадают кандидаты с заполненным **`tg_user_id`**; поле `username` не используется.
 - **`POST /broadcast-runs`** — создать запуск (см. код роутера; при `REDIS_URL` — `202` + RQ).
 - **`GET /broadcast-runs`**, **`GET /broadcast-runs/{id}`** — список и деталь (включая `message_body`).
@@ -432,9 +434,13 @@ Errors:
 
 Постраничная выдача исходов по получателям (`broadcast_deliveries`). Query: `limit` (1…200, default 50), `offset`, опционально `status`, `error_code`.
 
-Ответ: `{ "items": [ { "id", "broadcast_run_id", "candidate_id", "tg_user_id", "status", "error_code", "attempted_at", "username", "display_name" } ], "page": { "limit", "offset", "total" } }`.
+Ответ: `{ "items": [ { "id", "broadcast_run_id", "candidate_id", "tg_user_id", "status", "error_code", "attempted_at", "telegram_message_id", "username", "display_name" } ], "page": { "limit", "offset", "total" } }`. Поле **`telegram_message_id`** — cloud id сообщения в MTProto, если известен (после Telethon `send_message`); у строк со сбоем может быть заполнено частично (например при verify после send).
 
-**Семантика `status`:** `success` означает, что **Telegram API принял отправку** с нашей стороны; подтверждения «прочитано» в v1 нет.
+**Семантика `status`:** `success` означает, что **Telegram принял исходящее сообщение** (уровень MTProto: успешный RPC / объект сообщения); при включённом `verify_outbox_after_send` дополнительно должна пройти проверка outbox. Подтверждения «доставлено на устройство адресата» / «прочитано» в v1 нет.
+
+**Типичные `error_code` для рассылки (помимо `flood_wait`, `privacy_restricted`, `unknown`):** `peer_flood` (ограничение аккаунта на ЛС незнакомцам), `not_mutual_contact`, `no_telegram_message_id`, `outbox_verify_failed`, `premium_required`, `privacy_premium_required`, `payment_required` — по мере появления в логах; точный набор зависит от ответов Telegram.
+
+**Миграция БД:** для существующих инсталляций добавить колонку `broadcast_deliveries.telegram_message_id`: [`scripts/migrate_broadcast_delivery_telegram_message_id_pg.sql`](../scripts/migrate_broadcast_delivery_telegram_message_id_pg.sql), [`scripts/migrate_broadcast_delivery_telegram_message_id_sqlite.sql`](../scripts/migrate_broadcast_delivery_telegram_message_id_sqlite.sql).
 
 Ошибки: `404` `broadcast_run_not_found`.
 

@@ -280,6 +280,7 @@ class BroadcastDeliveryOut(BaseModel):
     status: str
     error_code: str | None
     attempted_at: datetime
+    telegram_message_id: int | None = None
     username: str | None = None
     display_name: str | None = None
 

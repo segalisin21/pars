@@ -2,9 +2,117 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from sqlalchemy import select
+
 from app.models import BroadcastDelivery, BroadcastRun, CandidateUser, utcnow
 from app.invite_scheduler import tick_broadcast_resume
-from app.services import process_broadcast_run, run_broadcast
+from app.services import _classify_dm_error, process_broadcast_run, run_broadcast
+
+
+def test_classify_dm_peer_flood_and_not_mutual():
+    class PeerFloodError(Exception):
+        pass
+
+    class UserNotMutualContactError(Exception):
+        pass
+
+    assert _classify_dm_error(PeerFloodError()) == "peer_flood"
+    assert _classify_dm_error(UserNotMutualContactError()) == "not_mutual_contact"
+
+
+def test_process_broadcast_outbox_verify_passes(session_factory, fake_tg):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=6011, username="v1", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="ov_ok",
+        message_body="x",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "verify_outbox_after_send": True},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    db.refresh(run)
+    assert run.status == "succeeded"
+    assert int(run.stats.get("success", 0)) == 1
+    row = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).one()
+    assert row.status == "success"
+    assert row.telegram_message_id == 1
+    assert row.error_code is None
+    db.close()
+
+
+def test_process_broadcast_outbox_verify_fails(session_factory, fake_tg):
+    fake_tg.outbox_verify_fail_message_ids.add(1)
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=6012, username="v2", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="ov_bad",
+        message_body="x",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "verify_outbox_after_send": True},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    db.refresh(run)
+    assert run.status == "succeeded"
+    assert int(run.stats.get("failed", 0)) == 1
+    assert int(run.stats.get("success", 0)) == 0
+    row = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).one()
+    assert row.status == "failed"
+    assert row.error_code == "outbox_verify_failed"
+    assert row.telegram_message_id == 1
+    db.close()
+
+
+def test_process_broadcast_verify_skipped_when_client_no_support(session_factory, fake_tg, monkeypatch):
+    monkeypatch.setattr(fake_tg, "supports_outbox_verify", lambda *args, **kwargs: False)
+
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=6013, username="v3", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="ov_skip",
+        message_body="x",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "verify_outbox_after_send": True},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    db.refresh(run)
+    assert int(run.stats.get("success", 0)) == 1
+    row = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).one()
+    assert row.status == "success"
+    assert row.telegram_message_id == 1
+    db.close()
 
 
 def test_process_broadcast_sends_dm(session_factory, fake_tg):
@@ -38,6 +146,8 @@ def test_process_broadcast_sends_dm(session_factory, fake_tg):
     assert len(fake_tg.dm_calls) == 2
     assert fake_tg.dm_calls[0][1] == "hello"
     assert int(run.stats.get("success", 0)) == 2
+    rows = db.scalars(select(BroadcastDelivery).where(BroadcastDelivery.broadcast_run_id == run.id)).all()
+    assert {r.telegram_message_id for r in rows} == {1, 2}
     db.close()
 
 

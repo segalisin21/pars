@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.db import Base, create_session_factory
 from app.main import create_app
 from app.models import Workspace
-from app.telegram_client import FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
+from app.telegram_client import DirectMessageSendResult, FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +26,8 @@ class FakeTelegramClient(TelegramClient):
     def __init__(self):
         self.invite_calls: list[tuple[str, int]] = []
         self.dm_calls: list[tuple[int, str]] = []
+        self._dm_message_seq = 0
+        self.outbox_verify_fail_message_ids: set[int] = set()
         self.participants_by_source: dict[str, list[TgUser]] = {}
         self.message_senders_by_source: dict[str, list[TgUser]] = {}
         self.flood_on_user_ids: set[int] = set()
@@ -49,10 +51,19 @@ class FakeTelegramClient(TelegramClient):
         if tg_user_id in self.flood_on_user_ids:
             raise FloodWaitError(60)
 
-    def send_direct_message(self, tg_user_id: int, text: str) -> None:
+    def supports_outbox_verify(self) -> bool:
+        return True
+
+    def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
         self.dm_calls.append((tg_user_id, text))
         if tg_user_id in self.flood_on_user_ids:
             raise FloodWaitError(60)
+        self._dm_message_seq += 1
+        return DirectMessageSendResult(message_id=self._dm_message_seq, out=True)
+
+    def verify_direct_message_outbox(self, tg_user_id: int, message_id: int) -> bool:
+        _ = tg_user_id
+        return int(message_id) not in self.outbox_verify_fail_message_ids
 
     def fetch_source_meta(self, source_identifier: str) -> SourceTelegramMeta | None:
         k = source_identifier.strip().removeprefix("@").lower()

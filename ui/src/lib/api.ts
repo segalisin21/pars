@@ -80,6 +80,8 @@ export type BroadcastDelivery = {
   status: string
   error_code: string | null
   attempted_at: string
+  /** MTProto cloud message id when known (Telethon); not recipient read receipt */
+  telegram_message_id?: number | null
   username: string | null
   display_name: string | null
 }

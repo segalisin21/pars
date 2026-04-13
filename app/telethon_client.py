@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable
 
-from app.telegram_client import FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
+from app.telegram_client import (
+    DirectMessageSendResult,
+    FloodWaitError,
+    SourceTelegramMeta,
+    TelegramClient,
+    TgUser,
+)
 
 
 @dataclass(frozen=True)
@@ -130,7 +136,10 @@ class TelethonTelegramClient(TelegramClient):
             except Exception:
                 pass
 
-    def send_direct_message(self, tg_user_id: int, text: str) -> None:
+    def supports_outbox_verify(self) -> bool:  # noqa: D102
+        return True
+
+    def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
         try:
             from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
             from telethon.sessions import StringSession  # type: ignore
@@ -141,7 +150,37 @@ class TelethonTelegramClient(TelegramClient):
         client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
         try:
             client.connect()
-            client.send_message(int(tg_user_id), text)
+            msg = client.send_message(int(tg_user_id), text)
+            mid = int(getattr(msg, "id", 0) or 0) or None
+            out = bool(getattr(msg, "out", True))
+            return DirectMessageSendResult(message_id=mid, out=out)
+        except _TelethonFloodWait as e:  # pragma: no cover (network)
+            raise FloodWaitError(int(getattr(e, "seconds", 0)))
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+    def verify_direct_message_outbox(self, tg_user_id: int, message_id: int) -> bool:
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+            from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Telethon is not installed") from e
+
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            raw = client.get_messages(int(tg_user_id), ids=int(message_id))
+            if raw is None:
+                return False
+            # ids=int returns a single Message; ids=list returns TotalList (subclass of list).
+            m = raw[0] if isinstance(raw, list) else raw
+            if m is None or getattr(m, "id", None) is None:
+                return False
+            return bool(getattr(m, "out", False))
         except _TelethonFloodWait as e:  # pragma: no cover (network)
             raise FloodWaitError(int(getattr(e, "seconds", 0)))
         finally:

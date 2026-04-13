@@ -15,7 +15,7 @@ from app.models import Source, Workspace
 from app.routers import register_routes
 from app.routers.context import RouteContext
 from app.schemas import SourceOut
-from app.telegram_client import TelegramClient
+from app.telegram_client import DirectMessageSendResult, TelegramClient
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +130,8 @@ def create_app(
             def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
                 return None
 
-            def send_direct_message(self, tg_user_id: int, text: str) -> None:
-                return None
+            def send_direct_message(self, tg_user_id: int, text: str) -> DirectMessageSendResult:
+                return DirectMessageSendResult(message_id=None)
 
         tg_client = _NoopTelegramClient()
 

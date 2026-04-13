@@ -980,6 +980,13 @@ def _classify_dm_error(exc: BaseException) -> str:
         "PeerIdInvalidError": "peer_invalid",
         "UserBotError": "user_bot",
         "ChatWriteForbiddenError": "write_forbidden",
+        # Account-level spam / stranger DM limits (Telethon PeerFloodError, RPC PEER_FLOOD).
+        "PeerFloodError": "peer_flood",
+        "UserNotMutualContactError": "not_mutual_contact",
+        # Premium / paid DM gates (names from telethon.errors.rpcerrorlist, may vary by layer).
+        "PremiumAccountRequiredError": "premium_required",
+        "PrivacyPremiumRequiredError": "privacy_premium_required",
+        "PaymentRequiredError": "payment_required",
     }
     if name in mapping:
         return mapping[name]
@@ -1079,6 +1086,7 @@ def process_broadcast_run(
     policy = run.policy if isinstance(run.policy, dict) else {}
     max_per_minute = int(policy.get("max_per_minute", 2))
     max_per_hour = int(policy.get("max_per_hour", 30))
+    verify_outbox_after_send = bool(policy.get("verify_outbox_after_send"))
     max_total: int | None = None
     raw_cap = policy.get("max_total")
     if raw_cap is not None:
@@ -1242,9 +1250,107 @@ def process_broadcast_run(
                 return run
 
             attempted += 1
-            tg_client.send_direct_message(tgid, body)
+            send_result = tg_client.send_direct_message(tgid, body)
             attempts_in_min += 1
             attempts_in_hour += 1
+
+            tg_mid = send_result.message_id
+            if verify_outbox_after_send and tg_client.supports_outbox_verify():
+                if tg_mid is None:
+                    failed += 1
+                    _merge_failed_by_code(failed_by_code, "no_telegram_message_id")
+                    db.add(
+                        BroadcastDelivery(
+                            workspace_id=workspace_id,
+                            broadcast_run_id=run.id,
+                            message_key=message_key,
+                            candidate_id=cand.id,
+                            tg_user_id=tgid,
+                            status="failed",
+                            error_code="no_telegram_message_id",
+                            attempted_at=utcnow(),
+                            telegram_message_id=None,
+                        )
+                    )
+                    continue
+                try:
+                    in_outbox = tg_client.verify_direct_message_outbox(tgid, int(tg_mid))
+                except FloodWaitError as e:
+                    attempts_in_min += 1
+                    attempts_in_hour += 1
+                    failed += 1
+                    code = "flood_wait"
+                    _merge_failed_by_code(failed_by_code, code)
+                    db.add(
+                        BroadcastDelivery(
+                            workspace_id=workspace_id,
+                            broadcast_run_id=run.id,
+                            message_key=message_key,
+                            candidate_id=cand.id,
+                            tg_user_id=tgid,
+                            status="failed",
+                            error_code=code,
+                            attempted_at=utcnow(),
+                            telegram_message_id=int(tg_mid),
+                        )
+                    )
+                    fw = int(getattr(e, "seconds", 0) or 0)
+                    next_eligible_at = utcnow() + timedelta(seconds=max(1, fw))
+                    mark_account_cooldown(db, acc_id, next_eligible_at)
+                    run.status = "paused"
+                    run.stats = _broadcast_run_stats_payload(
+                        attempted=attempted,
+                        success=success,
+                        skipped=skipped,
+                        skipped_duplicate=skipped_duplicate,
+                        failed=failed,
+                        failed_by_code=failed_by_code,
+                        last_candidate_id=last_candidate_id,
+                        resume_after_candidate_id=cand.id,
+                        pause_reason="flood_wait",
+                        next_eligible_at=next_eligible_at,
+                        remaining_candidates=remaining_candidates,
+                        flood_wait_seconds=fw,
+                    )
+                    db.flush()
+                    return run
+                except Exception as e:
+                    failed += 1
+                    code = _classify_dm_error(e)
+                    _merge_failed_by_code(failed_by_code, code)
+                    db.add(
+                        BroadcastDelivery(
+                            workspace_id=workspace_id,
+                            broadcast_run_id=run.id,
+                            message_key=message_key,
+                            candidate_id=cand.id,
+                            tg_user_id=tgid,
+                            status="failed",
+                            error_code=code,
+                            attempted_at=utcnow(),
+                            telegram_message_id=int(tg_mid),
+                        )
+                    )
+                    _maybe_suppress_after_dm_failure(db, workspace_id, cand, code)
+                    continue
+                if not in_outbox:
+                    failed += 1
+                    _merge_failed_by_code(failed_by_code, "outbox_verify_failed")
+                    db.add(
+                        BroadcastDelivery(
+                            workspace_id=workspace_id,
+                            broadcast_run_id=run.id,
+                            message_key=message_key,
+                            candidate_id=cand.id,
+                            tg_user_id=tgid,
+                            status="failed",
+                            error_code="outbox_verify_failed",
+                            attempted_at=utcnow(),
+                            telegram_message_id=int(tg_mid),
+                        )
+                    )
+                    continue
+
             try:
                 with db.begin_nested():
                     db.add(
@@ -1257,6 +1363,7 @@ def process_broadcast_run(
                             status="success",
                             error_code=None,
                             attempted_at=utcnow(),
+                            telegram_message_id=int(tg_mid) if tg_mid is not None else None,
                         )
                     )
                     db.flush()

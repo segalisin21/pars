@@ -1,5 +1,31 @@
 # Handoff
 
+## 2026-04-13 (broadcast DM verification)
+
+### What changed
+
+- Рассылка: `send_direct_message` возвращает `DirectMessageSendResult` с **cloud `message_id`**; в `broadcast_deliveries` сохраняется `telegram_message_id` (колонка + миграции pg/sqlite).
+- Опционально **`policy.verify_outbox_after_send`**: после send — `get_messages` по peer/id в Telethon (`verify_direct_message_outbox`); ошибки `outbox_verify_failed`, `no_telegram_message_id`; при `FloodWait` на verify — пауза как при обычном flood.
+- Классификация DM: `peer_flood`, `not_mutual_contact`, premium/payment-related имена исключений Telethon → стабильные коды.
+- API: `BroadcastDeliveryOut.telegram_message_id`; тип в `ui/src/lib/api.ts`.
+- Тесты: `test_classify_dm_peer_flood_and_not_mutual`, outbox verify pass/fail, verify skipped если `supports_outbox_verify` ложь.
+
+### Key files
+
+- `app/telegram_client.py`, `app/telethon_client.py`, `app/services.py`, `app/models.py`, `app/schemas.py`, `app/routers/broadcast_runs.py`, `app/main.py`, `tests/conftest.py`, `tests/test_broadcast.py`
+- `scripts/migrate_broadcast_delivery_telegram_message_id_pg.sql`, `scripts/migrate_broadcast_delivery_telegram_message_id_sqlite.sql`, `docs/REPORT.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Вторая RPC при verify увеличивает нагрузку на лимиты Telegram; по умолчанию verify выключен.
+- Успех/outbox не означает, что получатель увидел сообщение.
+
 ## 2026-04-13 (broadcast pacing)
 
 ### What changed

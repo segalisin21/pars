@@ -226,6 +226,8 @@ class BroadcastDelivery(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Cloud chat message id from MTProto when known (Telethon send_message); optional outbox re-check uses this id.
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     broadcast_run: Mapped["BroadcastRun"] = relationship(back_populates="deliveries")
     candidate: Mapped[CandidateUser] = relationship()

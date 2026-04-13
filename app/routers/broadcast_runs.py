@@ -275,6 +275,7 @@ def make_broadcast_runs_router(ctx: RouteContext) -> APIRouter:
                 status=d.status,
                 error_code=d.error_code,
                 attempted_at=d.attempted_at,
+                telegram_message_id=int(d.telegram_message_id) if d.telegram_message_id is not None else None,
                 username=uname,
                 display_name=dname,
             )
