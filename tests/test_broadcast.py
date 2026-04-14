@@ -4,7 +4,15 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from app.models import BroadcastDelivery, BroadcastRun, CandidateUser, utcnow
+from app.models import (
+    BroadcastDelivery,
+    BroadcastRun,
+    CandidateFeatures,
+    CandidateProfileFeatures,
+    CandidateUser,
+    TargetingProfile,
+    utcnow,
+)
 from app.invite_scheduler import tick_broadcast_resume
 from app.services import _classify_dm_error, process_broadcast_run, run_broadcast
 
@@ -577,3 +585,76 @@ def test_patch_broadcast_message_body_rejects_succeeded(client, session_factory)
     r = client.patch(f"/broadcast-runs/{rid}", json={"message_body": "y"})
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "broadcast_run_not_editable"
+
+
+def test_broadcast_targeting_profile_id_filters_by_profile_features(session_factory, fake_tg):
+    db = session_factory()
+    c = CandidateUser(workspace_id=1, tg_user_id=9901, username="u9901", display_name=None)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+
+    prof = TargetingProfile(
+        workspace_id=1,
+        name="p",
+        query="q",
+        language_mode="mixed",
+        params={
+            "version": "v2",
+            "limits": {"days": 14, "max_messages_per_source": 10, "max_candidate_text_chars": 4000, "max_candidates": None},
+            "terms": {"keywords_include": [], "keywords_exclude": [], "intent_phrases": []},
+            "weights": {"semantic": 1, "warmth": 1, "risk": 1},
+            "thresholds": {"min_send_score": 10, "segment_a_min": 40, "segment_b_min": 10},
+            "models": {"embedding_model": "text-embedding-3-small"},
+        },
+        created_at=utcnow(),
+        updated_at=utcnow(),
+    )
+    db.add(prof)
+    db.commit()
+    db.refresh(prof)
+
+    db.add(
+        CandidateFeatures(
+            workspace_id=1,
+            candidate_id=c.id,
+            segment="C",
+            send_score=0,
+            warmth_score=0,
+            risk_score=0,
+            reasons={},
+        )
+    )
+    db.add(
+        CandidateProfileFeatures(
+            workspace_id=1,
+            candidate_id=c.id,
+            targeting_profile_id=prof.id,
+            segment="A",
+            send_score=100,
+            warmth_score=50,
+            risk_score=0,
+            semantic_score=800,
+            reasons={"semantic_score": 800},
+        )
+    )
+    db.commit()
+
+    run = BroadcastRun(
+        workspace_id=1,
+        status="running",
+        message_key="tpid",
+        message_body="hello",
+        source_ids=[],
+        candidate_ids=[c.id],
+        policy={"max_per_minute": 10, "max_per_hour": 100, "targeting_profile_id": prof.id, "targeting_segment": "A"},
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    process_broadcast_run(db, fake_tg, run)
+    db.commit()
+    assert len(fake_tg.dm_calls) == 1
+    db.close()

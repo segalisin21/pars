@@ -94,12 +94,32 @@ export type TargetingProfile = {
   query: string
   language_mode: string
   params: Record<string, unknown>
+  draft_params?: Record<string, unknown> | null
+  draft_updated_at?: string | null
   updated_at: string
 }
 
 export type TargetingProfilesList = { items: TargetingProfile[] }
 
 export type TargetingProfilePreview = TargetingPreview
+
+export type TargetingRunLog = { id: number; msg: string; created_at: string }
+export type TargetingRun = {
+  id: number
+  profile_id: number
+  status: string
+  stage: string
+  progress: Record<string, unknown>
+  error: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  started_at: string | null
+  finished_at: string | null
+  logs: TargetingRunLog[]
+}
+export type TargetingRunStart = { run_id: number }
+
+export type TargetingCandidatesList = { items: TargetingPreviewCandidate[]; page: PageMeta }
 
 export type BroadcastPreview = {
   scan_total: number
@@ -407,6 +427,38 @@ export const api = {
     request<{ profile: TargetingProfile }>('/targeting/ai/suggest', { method: 'POST', body: JSON.stringify(payload) }),
   previewTargetingProfile: (payload: { profile_id: number; segment?: 'A' | 'B' | 'C' | 'any'; limit?: number }) =>
     request<TargetingProfilePreview>('/targeting/profiles/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  createTargetingProfile: (payload: { name?: string | null; query: string; language_mode?: 'ru' | 'mixed'; params: Record<string, unknown> }) =>
+    request<TargetingProfile>('/targeting/profiles', { method: 'POST', body: JSON.stringify(payload) }),
+  patchTargetingProfile: (id: number, payload: { name?: string | null; query?: string | null; language_mode?: 'ru' | 'mixed' | null; params?: Record<string, unknown> | null }) =>
+    request<TargetingProfile>(`/targeting/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  cloneTargetingProfile: (id: number) => request<TargetingProfile>(`/targeting/profiles/${id}/clone`, { method: 'POST', body: JSON.stringify({}) }),
+  suggestTargetingProfileDraft: (id: number) =>
+    request<{ draft_params: Record<string, unknown>; diff: { path: string; before: unknown; after: unknown }[] }>(`/targeting/profiles/${id}/ai-suggest`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  applyTargetingProfileDraft: (id: number) =>
+    request<{ profile: TargetingProfile }>(`/targeting/profiles/${id}/apply-draft`, { method: 'POST', body: JSON.stringify({}) }),
+  startTargetingRun: (id: number) =>
+    request<TargetingRunStart>(`/targeting/profiles/${id}/start`, { method: 'POST', body: JSON.stringify({}) }),
+  getTargetingRun: (runId: number) => request<TargetingRun>(`/targeting/runs/${runId}`),
+  listTargetingCandidatesTop: (id: number, params?: { n?: number; segment?: 'A' | 'B' | 'C'; min_send_score?: number }) => {
+    const sp = new URLSearchParams()
+    if (params?.n !== undefined) sp.set('n', String(params.n))
+    if (params?.segment) sp.set('segment', params.segment)
+    if (params?.min_send_score !== undefined) sp.set('min_send_score', String(params.min_send_score))
+    const qs = sp.toString()
+    return request<TargetingProfilePreview>(`/targeting/profiles/${id}/candidates/top${qs ? `?${qs}` : ''}`)
+  },
+  listTargetingCandidates: (id: number, params?: { limit?: number; offset?: number; segment?: 'A' | 'B' | 'C'; min_send_score?: number }) => {
+    const sp = new URLSearchParams()
+    if (params?.limit !== undefined) sp.set('limit', String(params.limit))
+    if (params?.offset !== undefined) sp.set('offset', String(params.offset))
+    if (params?.segment) sp.set('segment', params.segment)
+    if (params?.min_send_score !== undefined) sp.set('min_send_score', String(params.min_send_score))
+    const qs = sp.toString()
+    return request<TargetingCandidatesList>(`/targeting/profiles/${id}/candidates${qs ? `?${qs}` : ''}`)
+  },
   listBroadcastRuns: () => request<{ items: BroadcastRun[] }>('/broadcast-runs'),
   getBroadcastRun: (id: number) => request<BroadcastRun>(`/broadcast-runs/${id}`),
   startBroadcastRun: (payload: {

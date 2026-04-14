@@ -1,5 +1,33 @@
 # Handoff
 
+## 2026-04-14 (feat: Targeting v2 separate page + runs + per-profile scoring)
+
+### What changed
+
+- Добавлена отдельная страница **Таргетинг** (`/targeting`): профили, AI draft+diff/apply, Form + JSON (advanced), запуск пересчёта через RQ, журнал этапов и просмотр кандидатов (top‑N и все с пагинацией).
+- На странице **Рассылка** оставлен только выбор сохранённого профиля + фильтры `segment`/`min_score` в `policy` (без suggest/preview/редактирования).
+- Backend: `TargetingParamsV2` (строгая схема params), новые endpoints для профилей/черновика/запусков/кандидатов, новый job `execute_targeting_run`.
+- Хранение результатов пересчёта по профилям — таблица `candidate_profile_features` (не перетирает результаты разных профилей).
+- Broadcast: если задан `policy.targeting_profile_id`, фильтрация `targeting_segment/min_send_score` идёт по `candidate_profile_features`; иначе — по `candidate_features`.
+
+### Key files
+
+- `app/targeting_params.py`, `app/routers/targeting.py`, `app/worker_jobs.py`, `app/targeting_ai.py`, `app/models.py`, `app/services.py`, `app/schemas.py`
+- `ui/src/pages/TargetingPage.tsx`, `ui/src/App.tsx`, `ui/src/pages/BroadcastPage.tsx`, `ui/src/lib/api.ts`
+- Migrations (manual): `scripts/migrate_candidate_profile_features_pg.sql`, `scripts/migrate_candidate_profile_features_sqlite.sql`, `scripts/migrate_targeting_runs_pg.sql`, `scripts/migrate_targeting_runs_sqlite.sql`, `scripts/migrate_targeting_profiles_draft_pg.sql`, `scripts/migrate_targeting_profiles_draft_sqlite.sql`
+- Docs: `docs/REPORT.md`, `docs/DESIGN.md`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
+### Risks / known limitations
+
+- Для существующих Postgres/SQLite баз нужно вручную применить новые SQL-миграции (таблицы/колонки не добавятся автоматически через `create_all`).
+- `TargetingRun` требует `REDIS_URL` + запущенный `python -m app.worker`.
+
 ## 2026-04-13 (broadcast DM by username / policy.dm_recipient)
 
 ### What changed

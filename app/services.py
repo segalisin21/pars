@@ -14,6 +14,7 @@ from app.models import (
     BroadcastDelivery,
     BroadcastRun,
     CandidateFeatures,
+    CandidateProfileFeatures,
     CandidateSourceLink,
     CandidateUser,
     CollectRun,
@@ -1129,6 +1130,13 @@ def process_broadcast_run(
     verify_outbox_after_send = bool(policy.get("verify_outbox_after_send"))
     dm_mode = _broadcast_dm_recipient_mode(policy)
     targeting_segment = policy.get("targeting_segment") if isinstance(policy, dict) else None
+    targeting_profile_id_raw = policy.get("targeting_profile_id") if isinstance(policy, dict) else None
+    targeting_profile_id: int | None = None
+    if targeting_profile_id_raw is not None:
+        try:
+            targeting_profile_id = int(targeting_profile_id_raw)
+        except (TypeError, ValueError):
+            targeting_profile_id = None
     min_send_score_raw = policy.get("min_send_score") if isinstance(policy, dict) else None
     min_send_score: int | None = None
     if min_send_score_raw is not None:
@@ -1167,11 +1175,21 @@ def process_broadcast_run(
         resume_after=resume_after,
     )
     if targeting_segment in {"A", "B", "C"} or min_send_score is not None:
-        feat_q = select(CandidateFeatures.candidate_id).where(CandidateFeatures.workspace_id == workspace_id)
-        if targeting_segment in {"A", "B", "C"}:
-            feat_q = feat_q.where(CandidateFeatures.segment == str(targeting_segment))
-        if min_send_score is not None:
-            feat_q = feat_q.where(CandidateFeatures.send_score >= int(min_send_score))
+        if targeting_profile_id is not None:
+            feat_q = select(CandidateProfileFeatures.candidate_id).where(
+                CandidateProfileFeatures.workspace_id == workspace_id,
+                CandidateProfileFeatures.targeting_profile_id == int(targeting_profile_id),
+            )
+            if targeting_segment in {"A", "B", "C"}:
+                feat_q = feat_q.where(CandidateProfileFeatures.segment == str(targeting_segment))
+            if min_send_score is not None:
+                feat_q = feat_q.where(CandidateProfileFeatures.send_score >= int(min_send_score))
+        else:
+            feat_q = select(CandidateFeatures.candidate_id).where(CandidateFeatures.workspace_id == workspace_id)
+            if targeting_segment in {"A", "B", "C"}:
+                feat_q = feat_q.where(CandidateFeatures.segment == str(targeting_segment))
+            if min_send_score is not None:
+                feat_q = feat_q.where(CandidateFeatures.send_score >= int(min_send_score))
         cand_stmt = cand_stmt.where(CandidateUser.id.in_(feat_q))
 
     count_base = select(func.count()).select_from(CandidateUser).where(CandidateUser.workspace_id == workspace_id)

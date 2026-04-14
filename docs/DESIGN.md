@@ -69,7 +69,9 @@ When `OPENAI_API_KEY` is configured, the UI can create **TargetingProfile** obje
 
 - Profiles live in `targeting_profiles` (workspace-scoped) with `query`, `language_mode`, and JSON `params` suggested by the model.
 - Message text can be stored in `candidate_messages` (workspace/source/candidate) for high-relevance matching and embedding.
-- A recompute job (worker/cron) captures recent message snippets and computes `CandidateFeatures` under a specific `targeting_profile_id`, including `semantic_score`.
+- A recompute job (worker/RQ) captures recent message snippets and computes **profile-scoped** scoring into `candidate_profile_features` (unique by `(workspace_id, candidate_id, targeting_profile_id)`), including `semantic_score` and `reasons`.
+- Recompute progress is tracked as `targeting_runs` + `targeting_run_logs` and exposed via the API for the operator UI.
+- UI: separate page `/targeting` is used for profile editing (Form + JSON advanced), AI draft diff/apply, run journal and candidate lists. The broadcast page only selects an already-saved profile/segment/min-score for sending.
 
 ### Targets
 A **InviteTarget** is the destination group/chat.

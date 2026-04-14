@@ -142,6 +142,62 @@ class CandidateFeatures(Base):
     )
 
 
+class CandidateProfileFeatures(Base):
+    """Computed targeting features & scoring for a candidate under a specific targeting profile."""
+
+    __tablename__ = "candidate_profile_features"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_users.id"), nullable=False, index=True)
+    targeting_profile_id: Mapped[int] = mapped_column(ForeignKey("targeting_profiles.id"), nullable=False, index=True)
+
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    # Snapshot of base features (helps explainability in UI without joins).
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_priority_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    seen_as: Mapped[str] = mapped_column(String(16), nullable=False, default="participants")
+    has_username: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_display_name: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    topic_keywords: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    intent_flags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    # Profile-specific scoring.
+    semantic_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0..1000
+    warmth_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    send_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    segment: Mapped[str] = mapped_column(String(8), nullable=False, default="C")
+    reasons: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    candidate: Mapped[CandidateUser] = relationship()
+    workspace: Mapped[Workspace] = relationship()
+    profile: Mapped["TargetingProfile"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "candidate_id",
+            "targeting_profile_id",
+            name="uq_candidate_profile_features_ws_candidate_profile",
+        ),
+        Index(
+            "ix_candidate_profile_features_ws_profile_score",
+            "workspace_id",
+            "targeting_profile_id",
+            "send_score",
+        ),
+        Index(
+            "ix_candidate_profile_features_ws_profile_segment_score",
+            "workspace_id",
+            "targeting_profile_id",
+            "segment",
+            "send_score",
+        ),
+    )
+
+
 class TargetingProfile(Base):
     __tablename__ = "targeting_profiles"
 
@@ -151,9 +207,46 @@ class TargetingProfile(Base):
     query: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     language_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="mixed")  # ru|mixed
     params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    draft_params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    draft_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    workspace: Mapped[Workspace] = relationship()
+
+
+class TargetingRun(Base):
+    __tablename__ = "targeting_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("targeting_profiles.id"), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")  # queued|running|succeeded|failed|cancelled
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")  # capture_messages|embed_and_score|done
+    progress: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workspace: Mapped[Workspace] = relationship()
+    profile: Mapped["TargetingProfile"] = relationship()
+    logs: Mapped[list["TargetingRunLog"]] = relationship(back_populates="run")
+
+
+class TargetingRunLog(Base):
+    __tablename__ = "targeting_run_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("targeting_runs.id"), nullable=False, index=True)
+    msg: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    run: Mapped["TargetingRun"] = relationship(back_populates="logs")
     workspace: Mapped[Workspace] = relationship()
 
 

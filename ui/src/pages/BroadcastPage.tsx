@@ -40,14 +40,10 @@ export function BroadcastPage() {
   const [deliveriesLoading, setDeliveriesLoading] = useState(false)
   const [editMessageBody, setEditMessageBody] = useState('')
   const [savingMessageRunId, setSavingMessageRunId] = useState<number | null>(null)
-  const [targetingPreview, setTargetingPreview] = useState<Awaited<ReturnType<typeof api.previewTargeting>> | null>(null)
   const [targetingProfiles, setTargetingProfiles] = useState<TargetingProfile[] | null>(null)
-  const [targetingQuery, setTargetingQuery] = useState('')
-  const [targetingLangMode, setTargetingLangMode] = useState<'ru' | 'mixed'>('mixed')
   const [targetingProfileId, setTargetingProfileId] = useState('')
-  const [targetingProfilePreview, setTargetingProfilePreview] = useState<Awaited<ReturnType<typeof api.previewTargetingProfile>> | null>(
-    null,
-  )
+  const [targetingSegment, setTargetingSegment] = useState<'A' | 'B' | 'C' | ''>('')
+  const [targetingMinScore, setTargetingMinScore] = useState('')
 
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
 
@@ -190,7 +186,6 @@ export function BroadcastPage() {
   async function doPreview() {
     setErr(null)
     setPreview(null)
-    setTargetingPreview(null)
     setBusy(true)
     try {
       const cids = parseCandidateIds()
@@ -208,38 +203,21 @@ export function BroadcastPage() {
     }
   }
 
-  async function doTargetingPreview() {
-    setErr(null)
-    setTargetingPreview(null)
-    setBusy(true)
-    try {
-      const cids = parseCandidateIds()
-      const tp = await api.previewTargeting({
-        source_ids: [...sourceIds],
-        candidate_ids: cids,
-        segment: 'any',
-        limit: 50,
-      })
-      setTargetingPreview(tp)
-    } catch (e) {
-      setErr(formatApiError(e).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function start() {
     setErr(null)
     setBusy(true)
     try {
       const cids = parseCandidateIds()
       const mx = maxTotal.trim() === '' ? undefined : Number(maxTotal)
+      const ms = targetingMinScore.trim() === '' ? null : Number(targetingMinScore)
       const policy = {
         max_per_minute: Number(maxPerMinute) || 2,
         max_per_hour: Number(maxPerHour) || 30,
         max_total: mx !== undefined && Number.isFinite(mx) && mx > 0 ? mx : null,
         dm_recipient: dmRecipient,
         targeting_profile_id: targetingProfileId.trim() ? Number(targetingProfileId) : null,
+        targeting_segment: targetingSegment ? targetingSegment : null,
+        min_send_score: ms !== null && Number.isFinite(ms) ? ms : null,
       }
       const acc = accountChoice === '' ? null : Number(accountChoice)
       await api.startBroadcastRun({
@@ -251,36 +229,6 @@ export function BroadcastPage() {
         telegram_account_id: acc,
       })
       await load()
-    } catch (e) {
-      setErr(formatApiError(e).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function suggestProfile() {
-    setErr(null)
-    setBusy(true)
-    try {
-      const r = await api.suggestTargetingProfile({ query: targetingQuery.trim(), language_mode: targetingLangMode })
-      setTargetingProfiles((prev) => [r.profile, ...(prev ?? [])])
-      setTargetingProfileId(String(r.profile.id))
-    } catch (e) {
-      setErr(formatApiError(e).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function previewProfile() {
-    setErr(null)
-    setTargetingProfilePreview(null)
-    const pid = targetingProfileId.trim() ? Number(targetingProfileId) : null
-    if (!pid || Number.isNaN(pid)) return
-    setBusy(true)
-    try {
-      const r = await api.previewTargetingProfile({ profile_id: pid, segment: 'any', limit: 50 })
-      setTargetingProfilePreview(r)
     } catch (e) {
       setErr(formatApiError(e).message)
     } finally {
@@ -469,24 +417,8 @@ export function BroadcastPage() {
             </div>
           </fieldset>
           <fieldset className="field" disabled={busy} style={{ border: 'none', padding: 0, margin: 0, minWidth: 320 }}>
-            <div className="label">AI таргетинг (профиль)</div>
+            <div className="label">Целевая группа (сохранённый профиль)</div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <input
-                placeholder="Напр. селлеры маркетплейсов"
-                value={targetingQuery}
-                onChange={(e) => setTargetingQuery(e.target.value)}
-                disabled={busy}
-                style={{ width: 260 }}
-              />
-              <select value={targetingLangMode} onChange={(e) => setTargetingLangMode(e.target.value as 'ru' | 'mixed')} disabled={busy}>
-                <option value="mixed">mixed</option>
-                <option value="ru">ru</option>
-              </select>
-              <button type="button" className="btn" disabled={busy || !targetingQuery.trim()} onClick={() => void suggestProfile()}>
-                Suggest
-              </button>
-            </div>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
               <select value={targetingProfileId} onChange={(e) => setTargetingProfileId(e.target.value)} disabled={busy} style={{ width: 260 }}>
                 <option value="">без профиля</option>
                 {(targetingProfiles ?? []).map((p) => (
@@ -495,17 +427,23 @@ export function BroadcastPage() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="btn" disabled={busy || !targetingProfileId.trim()} onClick={() => void previewProfile()}>
-                Preview
-              </button>
+              <select value={targetingSegment} onChange={(e) => setTargetingSegment(e.target.value as any)} disabled={busy}>
+                <option value="">любой сегмент</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
+              <input
+                placeholder="min_score"
+                value={targetingMinScore}
+                onChange={(e) => setTargetingMinScore(e.target.value)}
+                disabled={busy}
+                style={{ width: 120 }}
+              />
             </div>
-            {targetingProfilePreview ? (
-              <div className="small muted" style={{ marginTop: 6 }}>
-                A={targetingProfilePreview.counts_by_segment.A ?? 0}, B={targetingProfilePreview.counts_by_segment.B ?? 0}, C=
-                {targetingProfilePreview.counts_by_segment.C ?? 0}. Чтобы пересчитать профиль (worker):{' '}
-                <code>python -m app.targeting_recompute --workspace-id 1 --targeting-profile-id {targetingProfileId || 0}</code>
-              </div>
-            ) : null}
+            <div className="small muted" style={{ marginTop: 6 }}>
+              Профиль и оценки настраиваются на странице «Таргетинг». Здесь только выбор сохранённой аудитории.
+            </div>
           </fieldset>
           {tgAccounts && tgAccounts.length > 0 ? (
             <label className="field">
@@ -522,9 +460,6 @@ export function BroadcastPage() {
           ) : null}
           <button type="button" className="btn" disabled={busy || !messageKey.trim()} onClick={() => void doPreview()}>
             Оценить охват
-          </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => void doTargetingPreview()}>
-            Оценить таргетинг
           </button>
           <button type="button" className="btn primary" disabled={busy || !messageKey.trim() || !messageBody.trim()} onClick={() => void start()}>
             {busy ? 'Запуск…' : 'Запустить'}
@@ -551,49 +486,6 @@ export function BroadcastPage() {
                 ? ' Нужен числовой tg_user_id у кандидата.'
                 : ' Нужен заполненный username; числовой ID подставится из ответа Telegram после отправки.'}
             </div>
-          </div>
-        ) : null}
-        {targetingPreview ? (
-          <div className="muted" style={{ marginTop: 10 }}>
-            <div>
-              <strong>Таргетинг (по сохранённым фичам):</strong>{' '}
-              A={targetingPreview.counts_by_segment.A ?? 0}, B={targetingPreview.counts_by_segment.B ?? 0}, C=
-              {targetingPreview.counts_by_segment.C ?? 0}
-            </div>
-            {targetingPreview.top.length > 0 ? (
-              <div style={{ marginTop: 8, overflowX: 'auto' }}>
-                <table className="table small">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Segment</th>
-                      <th>Score</th>
-                      <th>Seen</th>
-                      <th>Sources</th>
-                      <th>Username</th>
-                      <th>Keywords</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {targetingPreview.top.map((c) => (
-                      <tr key={c.candidate_id}>
-                        <td>{c.candidate_id}</td>
-                        <td>{c.segment}</td>
-                        <td>{c.send_score}</td>
-                        <td>{c.seen_as}</td>
-                        <td>{c.source_count}</td>
-                        <td>{c.username ? `@${c.username}` : '—'}</td>
-                        <td>{(c.topic_keywords ?? []).slice(0, 6).join(', ') || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="small" style={{ marginTop: 6 }}>
-                Нет данных. Сначала пересчитайте фичи: <code>python -m app.targeting_recompute --workspace-id 1</code>
-              </div>
-            )}
           </div>
         ) : null}
         <div className="hint" style={{ marginTop: 10 }}>

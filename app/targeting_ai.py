@@ -9,10 +9,21 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import CandidateEmbedding, CandidateFeatures, CandidateMessage, CandidateSourceLink, CandidateUser, Source, TargetingProfile, utcnow
+from app.models import (
+    CandidateEmbedding,
+    CandidateFeatures,
+    CandidateMessage,
+    CandidateProfileFeatures,
+    CandidateSourceLink,
+    CandidateUser,
+    Source,
+    TargetingProfile,
+    utcnow,
+)
 from app.openai_client import embed_texts
 from app.services import effective_collect_mode_for_source, normalize_username
 from app.telegram_client import TelegramClient, TgMessageSnippet
+from app.targeting_params import TargetingParamsV2
 
 
 def _sha256(s: str) -> str:
@@ -96,8 +107,15 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def _extract_profile_terms(params: dict) -> tuple[list[str], list[str]]:
-    inc = params.get("keywords_include")
-    exc = params.get("keywords_exclude")
+    # Backward compatible: accept both v1 flat keys and v2 nested structure.
+    if params.get("version") == "v2" and isinstance(params.get("terms"), dict):
+        terms = params.get("terms") or {}
+        inc = terms.get("keywords_include")
+        exc = terms.get("keywords_exclude")
+    else:
+        inc = params.get("keywords_include")
+        exc = params.get("keywords_exclude")
+
     include = [str(x).strip().lower() for x in inc] if isinstance(inc, list) else []
     exclude = [str(x).strip().lower() for x in exc] if isinstance(exc, list) else []
     include = [x for x in include if 2 <= len(x) <= 40][:60]
@@ -126,18 +144,31 @@ def _candidate_text(db: Session, workspace_id: int, candidate_id: int, *, max_ch
 
 
 def recompute_features_for_profile(db: Session, *, workspace_id: int, profile: TargetingProfile) -> int:
-    """Compute CandidateFeatures.targeting_profile_id + semantic_score for profile query using cached messages."""
+    """Compute profile-scoped scoring for candidates using cached messages."""
     params = profile.params if isinstance(profile.params, dict) else {}
     include, exclude = _extract_profile_terms(params)
+    # v2 params (strict) for run behavior; keep backward compatible defaults.
+    embedding_model = "text-embedding-3-small"
+    max_chars = 4000
+    weights_semantic = 1.0
+    if params.get("version") == "v2":
+        try:
+            v2 = TargetingParamsV2.model_validate(params)
+            embedding_model = v2.models.embedding_model
+            max_chars = v2.limits.max_candidate_text_chars
+            weights_semantic = float(v2.weights.semantic)
+        except Exception:
+            pass
+
     # Query embedding (OpenAI).
-    emb_q = embed_texts(model="text-embedding-3-small", inputs=[profile.query])[0]
+    emb_q = embed_texts(model=embedding_model, inputs=[profile.query])[0]
 
     candidates = db.scalars(select(CandidateUser).where(CandidateUser.workspace_id == workspace_id)).all()
     up = 0
     now = utcnow()
     for cand in candidates:
         # quick keyword gate
-        text = _candidate_text(db, workspace_id, cand.id)
+        text = _candidate_text(db, workspace_id, cand.id, max_chars=max_chars)
         if not text:
             continue
         low = text.lower()
@@ -151,34 +182,54 @@ def recompute_features_for_profile(db: Session, *, workspace_id: int, profile: T
             select(CandidateEmbedding).where(CandidateEmbedding.workspace_id == workspace_id, CandidateEmbedding.candidate_id == cand.id)
         )
         if ce is None or not isinstance(ce.vector, list) or len(ce.vector) == 0:
-            vec = embed_texts(model="text-embedding-3-small", inputs=[text])[0]
+            vec = embed_texts(model=embedding_model, inputs=[text])[0]
             if ce is None:
-                ce = CandidateEmbedding(workspace_id=workspace_id, candidate_id=cand.id, model="text-embedding-3-small", vector=vec)
+                ce = CandidateEmbedding(workspace_id=workspace_id, candidate_id=cand.id, model=embedding_model, vector=vec)
                 db.add(ce)
             else:
                 ce.vector = vec
-                ce.model = "text-embedding-3-small"
+                ce.model = embedding_model
             ce.updated_at = now
         sim = _cosine(emb_q, [float(x) for x in (ce.vector or [])])
         semantic = int(max(0.0, min(1.0, (sim + 1.0) / 2.0)) * 1000.0)
 
-        # Upsert CandidateFeatures row (reuse current warmth/risk if exists, else minimal).
-        cf = db.scalar(
+        base_cf = db.scalar(
             select(CandidateFeatures).where(CandidateFeatures.workspace_id == workspace_id, CandidateFeatures.candidate_id == cand.id)
         )
-        if cf is None:
-            cf = CandidateFeatures(workspace_id=workspace_id, candidate_id=cand.id)
-            db.add(cf)
-        cf.targeting_profile_id = int(profile.id)
-        cf.semantic_score = int(semantic)
-        # Combine into send_score conservatively.
-        base = int(cf.warmth_score) - int(cf.risk_score)
-        cf.send_score = int(base + (semantic // 20))  # 0..50 added
-        cf.segment = "A" if cf.send_score >= 40 else ("B" if cf.send_score >= 10 else "C")
-        rs = cf.reasons if isinstance(cf.reasons, dict) else {}
-        rs.update({"semantic_score": semantic, "profile_id": int(profile.id)})
-        cf.reasons = rs
-        cf.computed_at = now
+        warmth = int(base_cf.warmth_score) if base_cf is not None else 0
+        risk = int(base_cf.risk_score) if base_cf is not None else 0
+        base_send = warmth - risk
+        send_score = int(base_send + (semantic // 20) * weights_semantic)
+
+        cpf = db.scalar(
+            select(CandidateProfileFeatures).where(
+                CandidateProfileFeatures.workspace_id == workspace_id,
+                CandidateProfileFeatures.candidate_id == cand.id,
+                CandidateProfileFeatures.targeting_profile_id == int(profile.id),
+            )
+        )
+        if cpf is None:
+            cpf = CandidateProfileFeatures(workspace_id=workspace_id, candidate_id=cand.id, targeting_profile_id=int(profile.id))
+            db.add(cpf)
+
+        cpf.computed_at = now
+        if base_cf is not None:
+            cpf.source_count = int(base_cf.source_count)
+            cpf.source_priority_score = int(base_cf.source_priority_score)
+            cpf.seen_as = str(base_cf.seen_as)
+            cpf.has_username = bool(base_cf.has_username)
+            cpf.has_display_name = bool(base_cf.has_display_name)
+            cpf.topic_keywords = list(base_cf.topic_keywords or [])
+            cpf.intent_flags = list(base_cf.intent_flags or [])
+
+        cpf.semantic_score = int(semantic)
+        cpf.warmth_score = int(warmth)
+        cpf.risk_score = int(risk)
+        cpf.send_score = int(send_score)
+        cpf.segment = "A" if cpf.send_score >= 40 else ("B" if cpf.send_score >= 10 else "C")
+        reasons = dict(base_cf.reasons) if (base_cf is not None and isinstance(base_cf.reasons, dict)) else {}
+        reasons.update({"semantic_score": int(semantic), "profile_id": int(profile.id), "embedding_model": embedding_model})
+        cpf.reasons = reasons
         up += 1
 
     db.flush()

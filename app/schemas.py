@@ -357,10 +357,12 @@ class TargetingProfileOut(BaseModel):
     query: str
     language_mode: str
     params: dict[str, Any]
+    draft_params: dict[str, Any] | None = None
+    draft_updated_at: datetime | None = None
     updated_at: datetime
 
-    @field_serializer("updated_at")
-    def _serialize_tp_updated(self, v: datetime):
+    @field_serializer("updated_at", "draft_updated_at")
+    def _serialize_tp_updated(self, v: datetime | None):
         return iso_utc_z(v)
 
 
@@ -378,6 +380,29 @@ class TargetingAiSuggestOut(BaseModel):
     profile: TargetingProfileOut
 
 
+class TargetingProfileCreateIn(BaseModel):
+    name: str | None = Field(default=None, max_length=128)
+    query: str = Field(min_length=2, max_length=512)
+    language_mode: Literal["ru", "mixed"] = "mixed"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class TargetingProfilePatchIn(BaseModel):
+    name: str | None = Field(default=None, max_length=128)
+    query: str | None = Field(default=None, min_length=2, max_length=512)
+    language_mode: Literal["ru", "mixed"] | None = None
+    params: dict[str, Any] | None = None
+
+
+class TargetingAiSuggestDraftOut(BaseModel):
+    draft_params: dict[str, Any]
+    diff: list[dict[str, Any]]
+
+
+class TargetingApplyDraftOut(BaseModel):
+    profile: TargetingProfileOut
+
+
 class TargetingProfilePreviewIn(BaseModel):
     profile_id: int
     segment: Literal["A", "B", "C", "any"] = "any"
@@ -387,6 +412,43 @@ class TargetingProfilePreviewIn(BaseModel):
 class TargetingProfilePreviewOut(BaseModel):
     counts_by_segment: dict[str, int]
     top: list[TargetingCandidateOut]
+
+
+class TargetingCandidatesList(BaseModel):
+    items: list[TargetingCandidateOut]
+    page: PageMeta
+
+
+class TargetingRunLogOut(BaseModel):
+    id: int
+    msg: str
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TargetingRunOut(BaseModel):
+    id: int
+    profile_id: int
+    status: str
+    stage: str
+    progress: dict[str, Any]
+    error: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    logs: list[TargetingRunLogOut] = Field(default_factory=list)
+
+    @field_serializer("created_at", "updated_at", "started_at", "finished_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TargetingRunStartOut(BaseModel):
+    run_id: int
 
 
 class TelegramRequestCodeIn(BaseModel):
