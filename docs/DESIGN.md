@@ -54,6 +54,16 @@ A **CandidateUser** is a potential user for inviting.
 - If no `tg_user_id`, use normalized `username` as a weaker key (case-insensitive).
 - Preserve multiple provenance links (candidate discovered in multiple sources) via a join table or repeated `CandidateSourceLink` rows.
 
+### Targeting features (v1.5)
+To reduce Telegram DM risk, the service can compute **`CandidateFeatures`** (table `candidate_features`) per workspace/candidate:
+
+- Aggregated source context (how many sources, seen_as participants/messages/both)
+- Basic profile flags (username/display name present)
+- Lightweight text features from recent messages (keywords + intent flags)
+- Risk-first scoring (`warmth_score`, `risk_score`, `send_score`) and segment `A|B|C`
+
+These features are **computed periodically** (worker / Telethon) and then used by broadcast policy filters (`policy.targeting_segment`, `policy.min_send_score`).
+
 ### Targets
 A **InviteTarget** is the destination group/chat.
 

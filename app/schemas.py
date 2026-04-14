@@ -177,6 +177,9 @@ class BroadcastPolicy(BaseModel):
     max_per_hour: int = Field(default=30, ge=1, le=10000)
     max_total: int | None = Field(default=None)
     dm_recipient: DmRecipient = "tg_user_id"
+    # Optional targeting filters (require precomputed CandidateFeatures).
+    targeting_segment: Literal["A", "B", "C"] | None = None
+    min_send_score: int | None = Field(default=None)
 
     @field_validator("max_total")
     @classmethod
@@ -185,6 +188,15 @@ class BroadcastPolicy(BaseModel):
             return None
         if v < 1 or v > 100_000:
             raise ValueError("max_total must be between 1 and 100000")
+        return v
+
+    @field_validator("min_send_score")
+    @classmethod
+    def _validate_min_send_score(cls, v: int | None) -> int | None:
+        if v is None:
+            return None
+        if v < -1000 or v > 1000:
+            raise ValueError("min_send_score must be between -1000 and 1000")
         return v
 
 
@@ -293,6 +305,49 @@ class BroadcastDeliveryOut(BaseModel):
     @field_serializer("attempted_at")
     def _serialize_attempted_at(self, v: datetime):
         return iso_utc_z(v)
+
+
+class TargetingPreviewIn(BaseModel):
+    source_ids: list[int] = Field(default_factory=list, max_length=50)
+    candidate_ids: list[int] = Field(default_factory=list, max_length=5000)
+    segment: Literal["A", "B", "C", "any"] = "any"
+    limit: int = Field(default=50, ge=1, le=200)
+
+    @field_validator("source_ids", mode="after")
+    @classmethod
+    def _dedupe_tp_sources(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+    @field_validator("candidate_ids", mode="after")
+    @classmethod
+    def _dedupe_tp_candidates(cls, v: list[int]) -> list[int]:
+        return sorted(set(v))
+
+
+class TargetingCandidateOut(BaseModel):
+    candidate_id: int
+    tg_user_id: int | None
+    username: str | None
+    display_name: str | None
+    last_seen_at: datetime
+    segment: str
+    send_score: int
+    warmth_score: int
+    risk_score: int
+    source_count: int
+    seen_as: str
+    topic_keywords: list[str]
+    intent_flags: list[str]
+    reasons: dict[str, Any]
+
+    @field_serializer("last_seen_at")
+    def _serialize_last_seen_at(self, v: datetime):
+        return iso_utc_z(v)
+
+
+class TargetingPreviewOut(BaseModel):
+    counts_by_segment: dict[str, int]
+    top: list[TargetingCandidateOut]
 
 
 class TelegramRequestCodeIn(BaseModel):

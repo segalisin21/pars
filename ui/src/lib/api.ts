@@ -66,6 +66,28 @@ export type BroadcastRun = {
 
 export type DmRecipient = 'tg_user_id' | 'username'
 
+export type TargetingPreviewCandidate = {
+  candidate_id: number
+  tg_user_id: number | null
+  username: string | null
+  display_name: string | null
+  last_seen_at: string
+  segment: string
+  send_score: number
+  warmth_score: number
+  risk_score: number
+  source_count: number
+  seen_as: string
+  topic_keywords: string[]
+  intent_flags: string[]
+  reasons: Record<string, unknown>
+}
+
+export type TargetingPreview = {
+  counts_by_segment: Record<string, number>
+  top: TargetingPreviewCandidate[]
+}
+
 export type BroadcastPreview = {
   scan_total: number
   suppressed: number
@@ -360,6 +382,12 @@ export const api = {
     candidate_ids?: number[]
     dm_recipient?: DmRecipient
   }) => request<BroadcastPreview>('/broadcast-runs/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  previewTargeting: (payload: {
+    source_ids?: number[]
+    candidate_ids?: number[]
+    segment?: 'A' | 'B' | 'C' | 'any'
+    limit?: number
+  }) => request<TargetingPreview>('/broadcast-runs/targeting-preview', { method: 'POST', body: JSON.stringify(payload) }),
   listBroadcastRuns: () => request<{ items: BroadcastRun[] }>('/broadcast-runs'),
   getBroadcastRun: (id: number) => request<BroadcastRun>(`/broadcast-runs/${id}`),
   startBroadcastRun: (payload: {

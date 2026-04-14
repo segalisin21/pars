@@ -21,6 +21,15 @@ class TgUser:
 
 
 @dataclass(frozen=True)
+class TgMessageSnippet:
+    """Minimal message info for targeting analysis (no media)."""
+
+    sender: TgUser
+    text: str
+    date: datetime | None = None
+
+
+@dataclass(frozen=True)
 class DirectMessageSendResult:
     """Outcome of send_direct_message: Telegram server accepted the message (MTProto success).
 
@@ -91,5 +100,17 @@ class TelegramClient:
         min_date: datetime | None = None,
     ) -> Iterable[TgUser]:
         """Yield users inferred from message senders (supergroups/chats). Default: none (noop)."""
+        return iter(())
+
+    def iter_message_snippets(
+        self,
+        source_identifier: str,
+        *,
+        limit: int | None = None,
+        min_date: datetime | None = None,
+    ) -> Iterable[TgMessageSnippet]:
+        """Yield lightweight (sender, text, date) for recent messages. Default: none."""
+        _ = min_date
+        _ = limit
         return iter(())
 

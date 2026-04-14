@@ -428,7 +428,12 @@ Errors:
 
 - **`policy.dm_recipient` (`"tg_user_id"` | `"username"`, default `tg_user_id`):** как резолвить получателя для MTProto `send_message`. В режиме **`tg_user_id`** (прежнее поведение) кандидаты без числового `tg_user_id` пропускаются; дедуп «уже отправляли с этим `message_key`» — по успешной доставке с тем же `tg_user_id`. В режиме **`username`** отправка идёт по нормализованному **username** (без `@`); кандидаты без username пропускаются. Числовой **`tg_user_id`** в `broadcast_deliveries` берётся из БД кандидата, если он есть, иначе из ответа Telegram после send (`resolved_tg_user_id` в Telethon); если после успешного RPC id извлечь нельзя — `failed` с `missing_resolved_tg_user_id` (редкий случай; в строке может быть `tg_user_id=0`). Если у кандидата **нет** `tg_user_id`, дедуп успеха по этому `message_key` выполняется по **`candidate_id`** (иначе повторная рассылка не определилась бы только по числовому id).
 
+- **`policy.targeting_segment` (optional, `"A"|"B"|"C"`):** если задано — рассылка берёт только кандидатов, у которых в таблице `candidate_features` рассчитан этот сегмент.
+- **`policy.min_send_score` (optional, int):** если задано — рассылка берёт только кандидатов с `candidate_features.send_score >= min_send_score`.
+
 - **`POST /broadcast-runs/preview`** — dry-run счётчики без отправки: `scan_total`, `suppressed`, `missing_tg_user_id`, **`missing_username`**, `already_sent`, `eligible`. Тело запроса может включать **`dm_recipient`** (те же значения, что в `policy`), чтобы превью совпадало с запуском. При **`dm_recipient: tg_user_id`**: в **eligible** — есть `tg_user_id`, не подавлены, не было успешной доставки с этим ключом; **`missing_tg_user_id`** считает остальных в выборке (кроме подавленных); **`missing_username`** = `0`. При **`dm_recipient: username`**: в **eligible** — есть нормализованный username; **`missing_username`** считает отсутствие username; **`missing_tg_user_id`** = `0` (отсутствие id само по себе не исключает из eligible в этом режиме).
+
+- **`POST /broadcast-runs/targeting-preview`** — превью таргетинга по **уже рассчитанным** `candidate_features`: возвращает `counts_by_segment` и `top` (топ кандидатов по `send_score`). Если таблица пустая — `top=[]`. Пересчёт выполняется командой: `python -m app.targeting_recompute --workspace-id <id>`.
 - **`POST /broadcast-runs`** — создать запуск (см. код роутера; при `REDIS_URL` — `202` + RQ).
 - **`GET /broadcast-runs`**, **`GET /broadcast-runs/{id}`** — список и деталь (включая `message_body`).
 

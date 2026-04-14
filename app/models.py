@@ -98,6 +98,47 @@ class CandidateSourceLink(Base):
     __table_args__ = (UniqueConstraint("workspace_id", "candidate_id", "source_id", name="uq_candidate_source_workspace"),)
 
 
+class CandidateFeatures(Base):
+    """Computed targeting features & scoring for a candidate (workspace-scoped)."""
+
+    __tablename__ = "candidate_features"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_users.id"), nullable=False, index=True)
+
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    # Source-context aggregate.
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_priority_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    seen_as: Mapped[str] = mapped_column(String(16), nullable=False, default="participants")  # participants|messages|both|mixed
+
+    # Profile metadata flags.
+    has_username: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_display_name: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Text-derived features (best-effort, limited).
+    topic_keywords: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    intent_flags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    # Risk-first scoring.
+    warmth_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    send_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    segment: Mapped[str] = mapped_column(String(8), nullable=False, default="C")  # A|B|C
+
+    reasons: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    candidate: Mapped[CandidateUser] = relationship()
+    workspace: Mapped[Workspace] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "candidate_id", name="uq_candidate_features_ws_candidate"),
+        Index("ix_candidate_features_ws_segment_score", "workspace_id", "segment", "send_score"),
+    )
+
+
 class TelegramAccount(Base):
     """Global pool of Telegram user sessions (not workspace-scoped)."""
 

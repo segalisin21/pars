@@ -40,6 +40,7 @@ export function BroadcastPage() {
   const [deliveriesLoading, setDeliveriesLoading] = useState(false)
   const [editMessageBody, setEditMessageBody] = useState('')
   const [savingMessageRunId, setSavingMessageRunId] = useState<number | null>(null)
+  const [targetingPreview, setTargetingPreview] = useState<Awaited<ReturnType<typeof api.previewTargeting>> | null>(null)
 
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
 
@@ -175,6 +176,7 @@ export function BroadcastPage() {
   async function doPreview() {
     setErr(null)
     setPreview(null)
+    setTargetingPreview(null)
     setBusy(true)
     try {
       const cids = parseCandidateIds()
@@ -185,6 +187,26 @@ export function BroadcastPage() {
         dm_recipient: dmRecipient,
       })
       setPreview(p)
+    } catch (e) {
+      setErr(formatApiError(e).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doTargetingPreview() {
+    setErr(null)
+    setTargetingPreview(null)
+    setBusy(true)
+    try {
+      const cids = parseCandidateIds()
+      const tp = await api.previewTargeting({
+        source_ids: [...sourceIds],
+        candidate_ids: cids,
+        segment: 'any',
+        limit: 50,
+      })
+      setTargetingPreview(tp)
     } catch (e) {
       setErr(formatApiError(e).message)
     } finally {
@@ -417,6 +439,9 @@ export function BroadcastPage() {
           <button type="button" className="btn" disabled={busy || !messageKey.trim()} onClick={() => void doPreview()}>
             Оценить охват
           </button>
+          <button type="button" className="btn" disabled={busy} onClick={() => void doTargetingPreview()}>
+            Оценить таргетинг
+          </button>
           <button type="button" className="btn primary" disabled={busy || !messageKey.trim() || !messageBody.trim()} onClick={() => void start()}>
             {busy ? 'Запуск…' : 'Запустить'}
           </button>
@@ -442,6 +467,49 @@ export function BroadcastPage() {
                 ? ' Нужен числовой tg_user_id у кандидата.'
                 : ' Нужен заполненный username; числовой ID подставится из ответа Telegram после отправки.'}
             </div>
+          </div>
+        ) : null}
+        {targetingPreview ? (
+          <div className="muted" style={{ marginTop: 10 }}>
+            <div>
+              <strong>Таргетинг (по сохранённым фичам):</strong>{' '}
+              A={targetingPreview.counts_by_segment.A ?? 0}, B={targetingPreview.counts_by_segment.B ?? 0}, C=
+              {targetingPreview.counts_by_segment.C ?? 0}
+            </div>
+            {targetingPreview.top.length > 0 ? (
+              <div style={{ marginTop: 8, overflowX: 'auto' }}>
+                <table className="table small">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Segment</th>
+                      <th>Score</th>
+                      <th>Seen</th>
+                      <th>Sources</th>
+                      <th>Username</th>
+                      <th>Keywords</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {targetingPreview.top.map((c) => (
+                      <tr key={c.candidate_id}>
+                        <td>{c.candidate_id}</td>
+                        <td>{c.segment}</td>
+                        <td>{c.send_score}</td>
+                        <td>{c.seen_as}</td>
+                        <td>{c.source_count}</td>
+                        <td>{c.username ? `@${c.username}` : '—'}</td>
+                        <td>{(c.topic_keywords ?? []).slice(0, 6).join(', ') || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="small" style={{ marginTop: 6 }}>
+                Нет данных. Сначала пересчитайте фичи: <code>python -m app.targeting_recompute --workspace-id 1</code>
+              </div>
+            )}
           </div>
         ) : null}
         <div className="hint" style={{ marginTop: 10 }}>

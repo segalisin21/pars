@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     BroadcastDelivery,
     BroadcastRun,
+    CandidateFeatures,
     CandidateSourceLink,
     CandidateUser,
     CollectRun,
@@ -1127,6 +1128,14 @@ def process_broadcast_run(
     max_per_hour = int(policy.get("max_per_hour", 30))
     verify_outbox_after_send = bool(policy.get("verify_outbox_after_send"))
     dm_mode = _broadcast_dm_recipient_mode(policy)
+    targeting_segment = policy.get("targeting_segment") if isinstance(policy, dict) else None
+    min_send_score_raw = policy.get("min_send_score") if isinstance(policy, dict) else None
+    min_send_score: int | None = None
+    if min_send_score_raw is not None:
+        try:
+            min_send_score = int(min_send_score_raw)
+        except (TypeError, ValueError):
+            min_send_score = None
     max_total: int | None = None
     raw_cap = policy.get("max_total")
     if raw_cap is not None:
@@ -1157,6 +1166,13 @@ def process_broadcast_run(
         candidate_ids=candidate_ids_filter,
         resume_after=resume_after,
     )
+    if targeting_segment in {"A", "B", "C"} or min_send_score is not None:
+        feat_q = select(CandidateFeatures.candidate_id).where(CandidateFeatures.workspace_id == workspace_id)
+        if targeting_segment in {"A", "B", "C"}:
+            feat_q = feat_q.where(CandidateFeatures.segment == str(targeting_segment))
+        if min_send_score is not None:
+            feat_q = feat_q.where(CandidateFeatures.send_score >= int(min_send_score))
+        cand_stmt = cand_stmt.where(CandidateUser.id.in_(feat_q))
 
     count_base = select(func.count()).select_from(CandidateUser).where(CandidateUser.workspace_id == workspace_id)
     if resume_after > 0:
@@ -1503,6 +1519,30 @@ def process_broadcast_run(
                 )
             )
             _maybe_suppress_after_dm_failure(db, workspace_id, cand, code)
+
+        # Guardrail: if block/privacy failures accumulate early, pause to reduce ban risk.
+        # This is intentionally conservative and uses aggregate counters (no per-window state).
+        if attempted >= 20:
+            n_block = int(failed_by_code.get("user_blocked", 0) or 0)
+            n_priv = int(failed_by_code.get("privacy_restricted", 0) or 0)
+            n_peer_flood = int(failed_by_code.get("peer_flood", 0) or 0)
+            if n_peer_flood > 0 or (n_block + n_priv) >= 5:
+                run.status = "paused"
+                run.stats = _broadcast_run_stats_payload(
+                    attempted=attempted,
+                    success=success,
+                    skipped=skipped,
+                    skipped_duplicate=skipped_duplicate,
+                    failed=failed,
+                    failed_by_code=failed_by_code,
+                    last_candidate_id=last_candidate_id,
+                    resume_after_candidate_id=cand.id,
+                    pause_reason="risk_guardrail",
+                    next_eligible_at=(utcnow() + timedelta(minutes=30)),
+                    remaining_candidates=remaining_candidates,
+                )
+                db.flush()
+                return run
 
         if max_total is not None and success >= max_total:
             run.status = "succeeded"

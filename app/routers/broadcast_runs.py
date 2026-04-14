@@ -4,7 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AuditEvent, BroadcastDelivery, BroadcastRun, CandidateUser, Source, TelegramAccount, utcnow
+from app.models import (
+    AuditEvent,
+    BroadcastDelivery,
+    BroadcastRun,
+    CandidateFeatures,
+    CandidateSourceLink,
+    CandidateUser,
+    Source,
+    TelegramAccount,
+    utcnow,
+)
 from app.queue import get_rq_queue, is_queue_enabled
 from app.routers.context import RouteContext
 from app.schemas import (
@@ -17,6 +27,9 @@ from app.schemas import (
     BroadcastRunPatch,
     BroadcastRunsList,
     PageMeta,
+    TargetingCandidateOut,
+    TargetingPreviewIn,
+    TargetingPreviewOut,
 )
 from app.services import count_broadcast_preview, process_broadcast_run, run_broadcast
 from app.telegram_client import TelegramClient
@@ -83,6 +96,75 @@ def make_broadcast_runs_router(ctx: RouteContext) -> APIRouter:
             dm_recipient=payload.dm_recipient,
         )
         return BroadcastPreviewOut(**counts)
+
+    @router.post("/broadcast-runs/targeting-preview", response_model=TargetingPreviewOut)
+    def targeting_preview(
+        payload: TargetingPreviewIn,
+        db: Session = Depends(get_db),
+        workspace_id: int = Depends(get_workspace_id),
+        _auth=Depends(verify_admin_token),
+    ):
+        seg = payload.segment if payload.segment in {"A", "B", "C"} else None
+        stmt = (
+            select(CandidateFeatures, CandidateUser)
+            .join(CandidateUser, CandidateUser.id == CandidateFeatures.candidate_id)
+            .where(CandidateFeatures.workspace_id == workspace_id, CandidateUser.workspace_id == workspace_id)
+        )
+        if seg is not None:
+            stmt = stmt.where(CandidateFeatures.segment == seg)
+        if payload.candidate_ids:
+            stmt = stmt.where(CandidateFeatures.candidate_id.in_(payload.candidate_ids))
+        if payload.source_ids:
+            stmt = stmt.where(
+                CandidateFeatures.candidate_id.in_(
+                    select(CandidateSourceLink.candidate_id).where(
+                        CandidateSourceLink.workspace_id == workspace_id,
+                        CandidateSourceLink.source_id.in_(payload.source_ids),
+                    )
+                )
+            )
+        rows = db.execute(stmt.order_by(CandidateFeatures.send_score.desc()).limit(int(payload.limit))).all()
+
+        # Counts by segment (for same filters).
+        cnt_stmt = (
+            select(CandidateFeatures.segment, func.count(CandidateFeatures.id))
+            .join(CandidateUser, CandidateUser.id == CandidateFeatures.candidate_id)
+            .where(CandidateFeatures.workspace_id == workspace_id, CandidateUser.workspace_id == workspace_id)
+            .group_by(CandidateFeatures.segment)
+        )
+        if payload.candidate_ids:
+            cnt_stmt = cnt_stmt.where(CandidateFeatures.candidate_id.in_(payload.candidate_ids))
+        if payload.source_ids:
+            cnt_stmt = cnt_stmt.where(
+                CandidateFeatures.candidate_id.in_(
+                    select(CandidateSourceLink.candidate_id).where(
+                        CandidateSourceLink.workspace_id == workspace_id,
+                        CandidateSourceLink.source_id.in_(payload.source_ids),
+                    )
+                )
+            )
+        counts = {str(seg): int(n) for seg, n in db.execute(cnt_stmt).all()}
+
+        top = [
+            TargetingCandidateOut(
+                candidate_id=int(c.id),
+                tg_user_id=c.tg_user_id,
+                username=c.username,
+                display_name=c.display_name,
+                last_seen_at=c.last_seen_at,
+                segment=cf.segment,
+                send_score=int(cf.send_score),
+                warmth_score=int(cf.warmth_score),
+                risk_score=int(cf.risk_score),
+                source_count=int(cf.source_count),
+                seen_as=str(cf.seen_as),
+                topic_keywords=list(cf.topic_keywords or []),
+                intent_flags=list(cf.intent_flags or []),
+                reasons=cf.reasons if isinstance(cf.reasons, dict) else {},
+            )
+            for cf, c in rows
+        ]
+        return TargetingPreviewOut(counts_by_segment=counts, top=top)
 
     @router.post("/broadcast-runs", response_model=BroadcastRunOut, status_code=202)
     def start_broadcast_run(

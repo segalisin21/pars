@@ -477,6 +477,14 @@ def test_broadcast_duplicate_when_no_tg_user_id_uses_candidate(session_factory, 
     db.close()
 
 
+def test_targeting_preview_endpoint_empty_when_no_features(client):
+    r = client.post("/broadcast-runs/targeting-preview", json={"source_ids": [], "candidate_ids": [], "segment": "any", "limit": 50})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["top"] == []
+
+
+
 def test_list_broadcast_deliveries(client, session_factory):
     db = session_factory()
     c = CandidateUser(workspace_id=1, tg_user_id=9001, username=None, display_name="Nick")

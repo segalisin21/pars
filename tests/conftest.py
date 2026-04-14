@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.db import Base, create_session_factory
 from app.main import create_app
 from app.models import Workspace
-from app.telegram_client import DirectMessageSendResult, FloodWaitError, SourceTelegramMeta, TelegramClient, TgUser
+from app.telegram_client import DirectMessageSendResult, FloodWaitError, SourceTelegramMeta, TelegramClient, TgMessageSnippet, TgUser
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +31,7 @@ class FakeTelegramClient(TelegramClient):
         self.outbox_verify_fail_message_ids: set[int] = set()
         self.participants_by_source: dict[str, list[TgUser]] = {}
         self.message_senders_by_source: dict[str, list[TgUser]] = {}
+        self.message_snippets_by_source: dict[str, list[TgMessageSnippet]] = {}
         self.flood_on_user_ids: set[int] = set()
         self.source_meta_by_key: dict[str, SourceTelegramMeta] = {}
 
@@ -40,6 +41,13 @@ class FakeTelegramClient(TelegramClient):
     def iter_users_from_messages(self, source_identifier: str, *, limit=None, min_date=None):
         _ = min_date
         rows = list(self.message_senders_by_source.get(source_identifier, []))
+        if limit is not None and limit > 0:
+            rows = rows[:limit]
+        yield from rows
+
+    def iter_message_snippets(self, source_identifier: str, *, limit=None, min_date=None):
+        _ = min_date
+        rows = list(self.message_snippets_by_source.get(source_identifier, []))
         if limit is not None and limit > 0:
             rows = rows[:limit]
         yield from rows

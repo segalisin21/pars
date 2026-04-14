@@ -10,6 +10,7 @@ from app.telegram_client import (
     FloodWaitError,
     SourceTelegramMeta,
     TelegramClient,
+    TgMessageSnippet,
     TgUser,
 )
 
@@ -287,6 +288,66 @@ class TelethonTelegramClient(TelegramClient):
                 last = getattr(sender, "last_name", None) or ""
                 name = (first + " " + last).strip() or None
                 yield TgUser(tg_user_id=uid, username=un, display_name=name)
+        except _TelethonFloodWait as e:  # pragma: no cover (network)
+            raise FloodWaitError(int(getattr(e, "seconds", 0)))
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+    def iter_message_snippets(
+        self,
+        source_identifier: str,
+        *,
+        limit: int | None = None,
+        min_date: datetime | None = None,
+    ) -> Iterable[TgMessageSnippet]:
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+            from telethon.errors import FloodWaitError as _TelethonFloodWait  # type: ignore
+            from telethon.tl.types import PeerUser, User as TLUser  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise RuntimeError("Telethon is not installed") from e
+
+        ident = _normalize_identifier(source_identifier)
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            entity = client.get_entity(ident)
+            lim = limit if limit is not None and limit > 0 else None
+            for msg in client.iter_messages(entity, limit=lim):
+                if not msg or getattr(msg, "action", None) is not None:
+                    continue
+                txt = getattr(msg, "message", None)
+                if not isinstance(txt, str) or not txt.strip():
+                    continue
+                if min_date is not None and msg.date:
+                    mdt = msg.date
+                    if mdt.tzinfo is None:
+                        mdt = mdt.replace(tzinfo=timezone.utc)
+                    cmp_min = min_date
+                    if cmp_min.tzinfo is None:
+                        cmp_min = cmp_min.replace(tzinfo=timezone.utc)
+                    if mdt < cmp_min:
+                        break
+                sender = getattr(msg, "sender", None)
+                if sender is None and msg.from_id is not None and isinstance(msg.from_id, PeerUser):
+                    try:
+                        sender = client.get_entity(msg.from_id)
+                    except Exception:
+                        sender = None
+                if not isinstance(sender, TLUser):
+                    continue
+                if getattr(sender, "bot", False):
+                    continue
+                uid = int(sender.id)
+                un = getattr(sender, "username", None) or None
+                first = getattr(sender, "first_name", None) or ""
+                last = getattr(sender, "last_name", None) or ""
+                name = (first + " " + last).strip() or None
+                yield TgMessageSnippet(sender=TgUser(tg_user_id=uid, username=un, display_name=name), text=txt.strip(), date=msg.date)
         except _TelethonFloodWait as e:  # pragma: no cover (network)
             raise FloodWaitError(int(getattr(e, "seconds", 0)))
         finally:
