@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { BroadcastDelivery, BroadcastPreview, BroadcastRun, DmRecipient, Source } from '../lib/api'
+import type { BroadcastDelivery, BroadcastPreview, BroadcastRun, DmRecipient, Source, TargetingProfile } from '../lib/api'
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -41,6 +41,13 @@ export function BroadcastPage() {
   const [editMessageBody, setEditMessageBody] = useState('')
   const [savingMessageRunId, setSavingMessageRunId] = useState<number | null>(null)
   const [targetingPreview, setTargetingPreview] = useState<Awaited<ReturnType<typeof api.previewTargeting>> | null>(null)
+  const [targetingProfiles, setTargetingProfiles] = useState<TargetingProfile[] | null>(null)
+  const [targetingQuery, setTargetingQuery] = useState('')
+  const [targetingLangMode, setTargetingLangMode] = useState<'ru' | 'mixed'>('mixed')
+  const [targetingProfileId, setTargetingProfileId] = useState('')
+  const [targetingProfilePreview, setTargetingProfilePreview] = useState<Awaited<ReturnType<typeof api.previewTargetingProfile>> | null>(
+    null,
+  )
 
   const enabledSources = useMemo(() => (sources ?? []).filter((s) => s.enabled), [sources])
 
@@ -144,6 +151,13 @@ export function BroadcastPage() {
       .catch(() => setTgAccounts([]))
   }, [])
 
+  useEffect(() => {
+    void api
+      .listTargetingProfiles()
+      .then((r) => setTargetingProfiles(r.items))
+      .catch(() => setTargetingProfiles([]))
+  }, [])
+
   const needsPoll = useMemo(() => (runs ?? []).some(runIsActive), [runs])
   const focusNeedsPoll = useMemo(() => (focusedRun ? runIsActive(focusedRun) : false), [focusedRun])
 
@@ -225,6 +239,7 @@ export function BroadcastPage() {
         max_per_hour: Number(maxPerHour) || 30,
         max_total: mx !== undefined && Number.isFinite(mx) && mx > 0 ? mx : null,
         dm_recipient: dmRecipient,
+        targeting_profile_id: targetingProfileId.trim() ? Number(targetingProfileId) : null,
       }
       const acc = accountChoice === '' ? null : Number(accountChoice)
       await api.startBroadcastRun({
@@ -236,6 +251,36 @@ export function BroadcastPage() {
         telegram_account_id: acc,
       })
       await load()
+    } catch (e) {
+      setErr(formatApiError(e).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function suggestProfile() {
+    setErr(null)
+    setBusy(true)
+    try {
+      const r = await api.suggestTargetingProfile({ query: targetingQuery.trim(), language_mode: targetingLangMode })
+      setTargetingProfiles((prev) => [r.profile, ...(prev ?? [])])
+      setTargetingProfileId(String(r.profile.id))
+    } catch (e) {
+      setErr(formatApiError(e).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function previewProfile() {
+    setErr(null)
+    setTargetingProfilePreview(null)
+    const pid = targetingProfileId.trim() ? Number(targetingProfileId) : null
+    if (!pid || Number.isNaN(pid)) return
+    setBusy(true)
+    try {
+      const r = await api.previewTargetingProfile({ profile_id: pid, segment: 'any', limit: 50 })
+      setTargetingProfilePreview(r)
     } catch (e) {
       setErr(formatApiError(e).message)
     } finally {
@@ -422,6 +467,45 @@ export function BroadcastPage() {
             <div className="small muted" style={{ marginTop: 6 }}>
               В режиме username кандидаты без username не попадают в отправку.
             </div>
+          </fieldset>
+          <fieldset className="field" disabled={busy} style={{ border: 'none', padding: 0, margin: 0, minWidth: 320 }}>
+            <div className="label">AI таргетинг (профиль)</div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <input
+                placeholder="Напр. селлеры маркетплейсов"
+                value={targetingQuery}
+                onChange={(e) => setTargetingQuery(e.target.value)}
+                disabled={busy}
+                style={{ width: 260 }}
+              />
+              <select value={targetingLangMode} onChange={(e) => setTargetingLangMode(e.target.value as 'ru' | 'mixed')} disabled={busy}>
+                <option value="mixed">mixed</option>
+                <option value="ru">ru</option>
+              </select>
+              <button type="button" className="btn" disabled={busy || !targetingQuery.trim()} onClick={() => void suggestProfile()}>
+                Suggest
+              </button>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+              <select value={targetingProfileId} onChange={(e) => setTargetingProfileId(e.target.value)} disabled={busy} style={{ width: 260 }}>
+                <option value="">без профиля</option>
+                {(targetingProfiles ?? []).map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    #{p.id} {p.name || p.query}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn" disabled={busy || !targetingProfileId.trim()} onClick={() => void previewProfile()}>
+                Preview
+              </button>
+            </div>
+            {targetingProfilePreview ? (
+              <div className="small muted" style={{ marginTop: 6 }}>
+                A={targetingProfilePreview.counts_by_segment.A ?? 0}, B={targetingProfilePreview.counts_by_segment.B ?? 0}, C=
+                {targetingProfilePreview.counts_by_segment.C ?? 0}. Чтобы пересчитать профиль (worker):{' '}
+                <code>python -m app.targeting_recompute --workspace-id 1 --targeting-profile-id {targetingProfileId || 0}</code>
+              </div>
+            ) : null}
           </fieldset>
           {tgAccounts && tgAccounts.length > 0 ? (
             <label className="field">

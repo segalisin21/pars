@@ -88,6 +88,19 @@ export type TargetingPreview = {
   top: TargetingPreviewCandidate[]
 }
 
+export type TargetingProfile = {
+  id: number
+  name: string
+  query: string
+  language_mode: string
+  params: Record<string, unknown>
+  updated_at: string
+}
+
+export type TargetingProfilesList = { items: TargetingProfile[] }
+
+export type TargetingProfilePreview = TargetingPreview
+
 export type BroadcastPreview = {
   scan_total: number
   suppressed: number
@@ -388,6 +401,12 @@ export const api = {
     segment?: 'A' | 'B' | 'C' | 'any'
     limit?: number
   }) => request<TargetingPreview>('/broadcast-runs/targeting-preview', { method: 'POST', body: JSON.stringify(payload) }),
+
+  listTargetingProfiles: () => request<TargetingProfilesList>('/targeting/profiles'),
+  suggestTargetingProfile: (payload: { query: string; language_mode?: 'ru' | 'mixed'; name?: string | null }) =>
+    request<{ profile: TargetingProfile }>('/targeting/ai/suggest', { method: 'POST', body: JSON.stringify(payload) }),
+  previewTargetingProfile: (payload: { profile_id: number; segment?: 'A' | 'B' | 'C' | 'any'; limit?: number }) =>
+    request<TargetingProfilePreview>('/targeting/profiles/preview', { method: 'POST', body: JSON.stringify(payload) }),
   listBroadcastRuns: () => request<{ items: BroadcastRun[] }>('/broadcast-runs'),
   getBroadcastRun: (id: number) => request<BroadcastRun>(`/broadcast-runs/${id}`),
   startBroadcastRun: (payload: {

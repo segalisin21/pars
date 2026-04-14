@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS candidate_features (
   send_score INTEGER NOT NULL DEFAULT 0,
   segment TEXT NOT NULL DEFAULT 'C',
   reasons TEXT NOT NULL DEFAULT '{}',
+  targeting_profile_id INTEGER NULL,
+  semantic_score INTEGER NOT NULL DEFAULT 0,
   UNIQUE (workspace_id, candidate_id)
 );
 

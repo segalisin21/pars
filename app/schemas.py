@@ -180,6 +180,7 @@ class BroadcastPolicy(BaseModel):
     # Optional targeting filters (require precomputed CandidateFeatures).
     targeting_segment: Literal["A", "B", "C"] | None = None
     min_send_score: int | None = Field(default=None)
+    targeting_profile_id: int | None = None
 
     @field_validator("max_total")
     @classmethod
@@ -346,6 +347,44 @@ class TargetingCandidateOut(BaseModel):
 
 
 class TargetingPreviewOut(BaseModel):
+    counts_by_segment: dict[str, int]
+    top: list[TargetingCandidateOut]
+
+
+class TargetingProfileOut(BaseModel):
+    id: int
+    name: str
+    query: str
+    language_mode: str
+    params: dict[str, Any]
+    updated_at: datetime
+
+    @field_serializer("updated_at")
+    def _serialize_tp_updated(self, v: datetime):
+        return iso_utc_z(v)
+
+
+class TargetingProfilesList(BaseModel):
+    items: list[TargetingProfileOut]
+
+
+class TargetingAiSuggestIn(BaseModel):
+    query: str = Field(min_length=2, max_length=512)
+    language_mode: Literal["ru", "mixed"] = "mixed"
+    name: str | None = Field(default=None, max_length=128)
+
+
+class TargetingAiSuggestOut(BaseModel):
+    profile: TargetingProfileOut
+
+
+class TargetingProfilePreviewIn(BaseModel):
+    profile_id: int
+    segment: Literal["A", "B", "C", "any"] = "any"
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class TargetingProfilePreviewOut(BaseModel):
     counts_by_segment: dict[str, int]
     top: list[TargetingCandidateOut]
 

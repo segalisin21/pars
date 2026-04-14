@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS candidate_features (
   send_score INTEGER NOT NULL DEFAULT 0,
   segment VARCHAR(8) NOT NULL DEFAULT 'C',
   reasons JSONB NOT NULL DEFAULT '{}'::jsonb,
+  targeting_profile_id INTEGER NULL REFERENCES targeting_profiles(id),
+  semantic_score INTEGER NOT NULL DEFAULT 0,
   CONSTRAINT uq_candidate_features_ws_candidate UNIQUE (workspace_id, candidate_id)
 );
 

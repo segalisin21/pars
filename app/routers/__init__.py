@@ -14,6 +14,7 @@ from app.routers.invite_attempts import make_invite_attempts_router
 from app.routers.invite_runs import make_invite_runs_router
 from app.routers.sources import make_sources_router
 from app.routers.suppression import make_suppression_router
+from app.routers.targeting import make_targeting_router
 from app.routers.targets import make_targets_router
 from app.routers.telegram_accounts import make_telegram_accounts_router
 from app.routers.telegram_auth import make_telegram_auth_router
@@ -30,6 +31,7 @@ def register_routes(app: FastAPI, ctx: RouteContext) -> None:
     app.include_router(make_collect_runs_router(ctx))
     app.include_router(make_invite_runs_router(ctx))
     app.include_router(make_broadcast_runs_router(ctx))
+    app.include_router(make_targeting_router(ctx))
     app.include_router(make_audit_router(ctx))
     app.include_router(make_telegram_auth_router(ctx))
     app.include_router(make_telegram_accounts_router(ctx))

@@ -129,6 +129,9 @@ class CandidateFeatures(Base):
     segment: Mapped[str] = mapped_column(String(8), nullable=False, default="C")  # A|B|C
 
     reasons: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Optional: computed under a specific targeting profile.
+    targeting_profile_id: Mapped[int | None] = mapped_column(ForeignKey("targeting_profiles.id"), nullable=True, index=True)
+    semantic_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0..1000 scaled cosine similarity
 
     candidate: Mapped[CandidateUser] = relationship()
     workspace: Mapped[Workspace] = relationship()
@@ -137,6 +140,56 @@ class CandidateFeatures(Base):
         UniqueConstraint("workspace_id", "candidate_id", name="uq_candidate_features_ws_candidate"),
         Index("ix_candidate_features_ws_segment_score", "workspace_id", "segment", "send_score"),
     )
+
+
+class TargetingProfile(Base):
+    __tablename__ = "targeting_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    query: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    language_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="mixed")  # ru|mixed
+    params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    workspace: Mapped[Workspace] = relationship()
+
+
+class CandidateMessage(Base):
+    __tablename__ = "candidate_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_users.id"), nullable=False, index=True)
+    msg_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    candidate: Mapped[CandidateUser] = relationship()
+    source: Mapped[Source] = relationship()
+    workspace: Mapped[Workspace] = relationship()
+
+    __table_args__ = (
+        Index("ix_candidate_messages_ws_candidate_date", "workspace_id", "candidate_id", "msg_date"),
+        UniqueConstraint("workspace_id", "candidate_id", "text_hash", name="uq_candidate_messages_ws_candidate_hash"),
+    )
+
+
+class CandidateEmbedding(Base):
+    __tablename__ = "candidate_embeddings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_users.id"), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="text-embedding-3-small")
+    vector: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("workspace_id", "candidate_id", name="uq_candidate_embeddings_ws_candidate"),)
 
 
 class TelegramAccount(Base):

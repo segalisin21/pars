@@ -64,6 +64,13 @@ To reduce Telegram DM risk, the service can compute **`CandidateFeatures`** (tab
 
 These features are **computed periodically** (worker / Telethon) and then used by broadcast policy filters (`policy.targeting_segment`, `policy.min_send_score`).
 
+### AI Targeting profiles (v2)
+When `OPENAI_API_KEY` is configured, the UI can create **TargetingProfile** objects from a free-text query (e.g. "селлеры маркетплейсов").
+
+- Profiles live in `targeting_profiles` (workspace-scoped) with `query`, `language_mode`, and JSON `params` suggested by the model.
+- Message text can be stored in `candidate_messages` (workspace/source/candidate) for high-relevance matching and embedding.
+- A recompute job (worker/cron) captures recent message snippets and computes `CandidateFeatures` under a specific `targeting_profile_id`, including `semantic_score`.
+
 ### Targets
 A **InviteTarget** is the destination group/chat.
 

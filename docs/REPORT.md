@@ -430,6 +430,7 @@ Errors:
 
 - **`policy.targeting_segment` (optional, `"A"|"B"|"C"`):** если задано — рассылка берёт только кандидатов, у которых в таблице `candidate_features` рассчитан этот сегмент.
 - **`policy.min_send_score` (optional, int):** если задано — рассылка берёт только кандидатов с `candidate_features.send_score >= min_send_score`.
+- **`policy.targeting_profile_id` (optional, int):** если задано — рассылка/превью могут использовать `candidate_features`, рассчитанные для конкретного AI‑профиля (см. Targeting).
 
 - **`POST /broadcast-runs/preview`** — dry-run счётчики без отправки: `scan_total`, `suppressed`, `missing_tg_user_id`, **`missing_username`**, `already_sent`, `eligible`. Тело запроса может включать **`dm_recipient`** (те же значения, что в `policy`), чтобы превью совпадало с запуском. При **`dm_recipient: tg_user_id`**: в **eligible** — есть `tg_user_id`, не подавлены, не было успешной доставки с этим ключом; **`missing_tg_user_id`** считает остальных в выборке (кроме подавленных); **`missing_username`** = `0`. При **`dm_recipient: username`**: в **eligible** — есть нормализованный username; **`missing_username`** считает отсутствие username; **`missing_tg_user_id`** = `0` (отсутствие id само по себе не исключает из eligible в этом режиме).
 
