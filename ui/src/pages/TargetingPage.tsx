@@ -158,7 +158,7 @@ export function TargetingPage() {
     setErr(null)
     setBusy(true)
     try {
-      const p = await api.patchTargetingProfile(pid, { name: name.trim() || null, query: query.trim(), language_mode: langMode, params })
+      await api.patchTargetingProfile(pid, { name: name.trim() || null, query: query.trim(), language_mode: langMode, params })
       await loadProfiles()
     } catch (e) {
       setErr(formatApiError(e).message)
@@ -208,7 +208,7 @@ export function TargetingPage() {
     setErr(null)
     setBusy(true)
     try {
-      const r = await api.applyTargetingProfileDraft(pid)
+      await api.applyTargetingProfileDraft(pid)
       await loadProfiles()
       setDraftDiff(null)
     } catch (e) {
