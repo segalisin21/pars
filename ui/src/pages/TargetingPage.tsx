@@ -58,7 +58,6 @@ function candidateLabel(c: TargetingPreviewCandidate): string {
 export function TargetingPage() {
   const [profiles, setProfiles] = useState<TargetingProfile[] | null>(null)
   const [profileId, setProfileId] = useState('')
-  const [profile, setProfile] = useState<TargetingProfile | null>(null)
   const [query, setQuery] = useState('')
   const [name, setName] = useState('')
   const [langMode, setLangMode] = useState<'ru' | 'mixed'>('mixed')
@@ -103,11 +102,9 @@ export function TargetingPage() {
 
   useEffect(() => {
     if (!pid || !profiles) {
-      setProfile(null)
       return
     }
     const p = profiles.find((x) => x.id === pid) ?? null
-    setProfile(p)
     setQuery(p?.query ?? '')
     setName(p?.name ?? '')
     setLangMode((p?.language_mode as 'ru' | 'mixed') || 'mixed')
@@ -163,7 +160,6 @@ export function TargetingPage() {
     try {
       const p = await api.patchTargetingProfile(pid, { name: name.trim() || null, query: query.trim(), language_mode: langMode, params })
       await loadProfiles()
-      setProfile(p)
     } catch (e) {
       setErr(formatApiError(e).message)
     } finally {
@@ -214,7 +210,6 @@ export function TargetingPage() {
     try {
       const r = await api.applyTargetingProfileDraft(pid)
       await loadProfiles()
-      setProfile(r.profile)
       setDraftDiff(null)
     } catch (e) {
       setErr(formatApiError(e).message)
