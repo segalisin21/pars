@@ -13,7 +13,6 @@ function fmtBusy(busy: TelegramAccountStatus['busy']): string {
 export function TelegramAccountsStatusPage() {
   const [items, setItems] = useState<TelegramAccountStatus[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
 
   const load = useCallback(async () => {
@@ -72,7 +71,7 @@ export function TelegramAccountsStatusPage() {
       <section className="card">
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="cardTitle">Список</div>
-          <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
+          <button type="button" className="btn" disabled={actionBusyId !== null} onClick={() => void load()}>
             Обновить
           </button>
         </div>
@@ -117,7 +116,7 @@ export function TelegramAccountsStatusPage() {
                       type="button"
                       className="btn"
                       onClick={() => void testSession(a.id)}
-                      disabled={actionBusyId === a.id || busy}
+                      disabled={actionBusyId === a.id}
                     >
                       {actionBusyId === a.id ? '…' : 'Проверить сессию'}
                     </button>
@@ -125,7 +124,7 @@ export function TelegramAccountsStatusPage() {
                       type="button"
                       className="btn"
                       onClick={() => void checkSpamBot(a.id)}
-                      disabled={actionBusyId === a.id || busy || !a.enabled}
+                      disabled={actionBusyId === a.id || !a.enabled}
                     >
                       {actionBusyId === a.id ? '…' : 'Проверить @SpamBot'}
                     </button>
