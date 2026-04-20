@@ -60,7 +60,7 @@ def execute_collect_run(*, run_id: int) -> None:
             run.status = "failed"
             run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
             db.commit()
-            return
+            raise
 
         run.status = "running"
         db.flush()
@@ -81,8 +81,7 @@ def execute_collect_run(*, run_id: int) -> None:
                 run.source_ids,
                 _tg_client_mode(tg),
             )
-            # Do not re-raise: we want the job to finish cleanly after persisting failure status/stats.
-            return
+            raise
         finally:
             db.commit()
     finally:
@@ -105,7 +104,7 @@ def execute_invite_run(*, run_id: int) -> None:
             run.status = "failed"
             run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
             db.commit()
-            return
+            raise
 
         run.status = "running"
         db.flush()
@@ -126,6 +125,7 @@ def execute_invite_run(*, run_id: int) -> None:
                 run.target_id,
                 _tg_client_mode(tg),
             )
+            raise
         finally:
             db.commit()
     finally:
@@ -148,7 +148,7 @@ def execute_broadcast_run(*, run_id: int) -> None:
             run.status = "failed"
             run.stats = {"error": {"code": "telegram_client_error", "message": str(e)}}
             db.commit()
-            return
+            raise
 
         run.status = "running"
         db.flush()
@@ -169,6 +169,7 @@ def execute_broadcast_run(*, run_id: int) -> None:
                 getattr(run, "message_key", ""),
                 _tg_client_mode(tg),
             )
+            raise
         finally:
             db.commit()
     finally:

@@ -1,5 +1,22 @@
 # Handoff
 
+## 2026-04-20 (fix: RQ jobs fail when collect/invite/broadcast worker steps error)
+
+### What changed
+
+- `execute_collect_run`, `execute_invite_run`, `execute_broadcast_run`: после записи `status=failed` и логирования исключение **пробрасывается** (`raise`), чтобы RQ помечал job как failed; `finally: db.commit()` по-прежнему сохраняет состояние run до выхода.
+- То же для ветки **telegram client error** (после `db.commit()`).
+
+### Key files
+
+- `app/worker_jobs.py`
+
+### How to verify
+
+```bash
+pytest tests/ -v --tb=short
+```
+
 ## 2026-04-14 (feat: Targeting v2 separate page + runs + per-profile scoring)
 
 ### What changed

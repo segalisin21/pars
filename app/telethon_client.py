@@ -114,84 +114,6 @@ class TelethonTelegramClient(TelegramClient):
             except Exception:
                 pass
 
-
-async def async_verify_session(cfg: TelethonConfig) -> tuple[bool, str | None, str | None]:
-    """Async connect, get_me, disconnect. Returns (ok, username, error)."""
-    try:
-        from telethon import TelegramClient as _TelethonClient  # type: ignore
-        from telethon.sessions import StringSession  # type: ignore
-    except Exception as e:  # pragma: no cover
-        return False, None, str(e)
-
-    client = _TelethonClient(StringSession(cfg.session_string), cfg.api_id, cfg.api_hash)
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return False, None, "not_authorized"
-        me = await client.get_me()
-        un = getattr(me, "username", None) or None
-        return True, un, None
-    except Exception as e:  # pragma: no cover (network)
-        return False, None, type(e).__name__
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-
-
-async def async_fetch_inbox_text(
-    cfg: TelethonConfig,
-    *,
-    peer: str,
-    limit: int = 20,
-) -> tuple[bool, list[dict], str | None]:
-    """
-    Fetch last messages from a peer (e.g. '777000' or 'SpamBot' or '@username').
-    Returns (ok, items, error). Items are minimal dicts for UI.
-    """
-    try:
-        from telethon import TelegramClient as _TelethonClient  # type: ignore
-        from telethon.sessions import StringSession  # type: ignore
-    except Exception as e:  # pragma: no cover
-        return False, [], str(e)
-
-    peer_norm = peer.strip()
-    if peer_norm.startswith("@"):
-        peer_norm = peer_norm[1:]
-
-    lim = int(limit) if int(limit) > 0 else 20
-    lim = min(lim, 50)
-
-    client = _TelethonClient(StringSession(cfg.session_string), cfg.api_id, cfg.api_hash)
-    try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            return False, [], "not_authorized"
-        msgs = await client.get_messages(peer_norm, limit=lim)
-        out: list[dict] = []
-        for m in list(msgs or []):
-            txt = getattr(m, "message", None)
-            if not isinstance(txt, str):
-                txt = ""
-            dt = getattr(m, "date", None)
-            out.append(
-                {
-                    "id": int(getattr(m, "id", 0) or 0),
-                    "date": dt.isoformat() if dt is not None else None,
-                    "text": txt,
-                    "out": bool(getattr(m, "out", False)),
-                }
-            )
-        return True, out, None
-    except Exception as e:  # pragma: no cover (network)
-        return False, [], type(e).__name__
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-
     def fetch_spambot_status(self) -> tuple[bool, str | None, str | None]:
         """
         Best-effort anti-spam status via @SpamBot.
@@ -497,3 +419,80 @@ async def async_fetch_inbox_text(
             except Exception:
                 pass
 
+
+async def async_verify_session(cfg: TelethonConfig) -> tuple[bool, str | None, str | None]:
+    """Async connect, get_me, disconnect. Returns (ok, username, error)."""
+    try:
+        from telethon import TelegramClient as _TelethonClient  # type: ignore
+        from telethon.sessions import StringSession  # type: ignore
+    except Exception as e:  # pragma: no cover
+        return False, None, str(e)
+
+    client = _TelethonClient(StringSession(cfg.session_string), cfg.api_id, cfg.api_hash)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return False, None, "not_authorized"
+        me = await client.get_me()
+        un = getattr(me, "username", None) or None
+        return True, un, None
+    except Exception as e:  # pragma: no cover (network)
+        return False, None, type(e).__name__
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+async def async_fetch_inbox_text(
+    cfg: TelethonConfig,
+    *,
+    peer: str,
+    limit: int = 20,
+) -> tuple[bool, list[dict], str | None]:
+    """
+    Fetch last messages from a peer (e.g. '777000' or 'SpamBot' or '@username').
+    Returns (ok, items, error). Items are minimal dicts for UI.
+    """
+    try:
+        from telethon import TelegramClient as _TelethonClient  # type: ignore
+        from telethon.sessions import StringSession  # type: ignore
+    except Exception as e:  # pragma: no cover
+        return False, [], str(e)
+
+    peer_norm = peer.strip()
+    if peer_norm.startswith("@"):
+        peer_norm = peer_norm[1:]
+
+    lim = int(limit) if int(limit) > 0 else 20
+    lim = min(lim, 50)
+
+    client = _TelethonClient(StringSession(cfg.session_string), cfg.api_id, cfg.api_hash)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return False, [], "not_authorized"
+        msgs = await client.get_messages(peer_norm, limit=lim)
+        out: list[dict] = []
+        for m in list(msgs or []):
+            txt = getattr(m, "message", None)
+            if not isinstance(txt, str):
+                txt = ""
+            dt = getattr(m, "date", None)
+            out.append(
+                {
+                    "id": int(getattr(m, "id", 0) or 0),
+                    "date": dt.isoformat() if dt is not None else None,
+                    "text": txt,
+                    "out": bool(getattr(m, "out", False)),
+                }
+            )
+        return True, out, None
+    except Exception as e:  # pragma: no cover (network)
+        return False, [], type(e).__name__
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
