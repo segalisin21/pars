@@ -152,6 +152,7 @@ export type BroadcastDeliveriesList = {
 export type TelegramAccount = {
   id: number
   label: string
+  last_username?: string | null
   enabled: boolean
   created_at: string
   last_used_at: string | null
@@ -160,6 +161,31 @@ export type TelegramAccount = {
   last_error_at: string | null
   cooldown_until: string | null
 }
+
+export type TelegramAppCredentials = {
+  configured: boolean
+  api_id: number | null
+  updated_at: string | null
+}
+
+export type TelegramAccountBusy = {
+  kind: 'collect' | 'invite' | 'broadcast' | string
+  run_id: number
+  status: string
+  started_at: string
+}
+
+export type TelegramAccountStatus = {
+  account: TelegramAccount
+  busy: TelegramAccountBusy | null
+  spambot_status_text: string | null
+  spambot_checked_at: string | null
+  spambot_error: string | null
+}
+
+export type TelegramAccountsStatusList = { items: TelegramAccountStatus[] }
+
+export type TelegramSpamBotCheckOut = { enqueued: boolean; job_id: string | null }
 
 export type TelegramRequestCodeOut = {
   token: string | null
@@ -404,6 +430,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+  listTelegramAccountsStatus: () => request<TelegramAccountsStatusList>('/telegram-accounts/status'),
+  checkTelegramAccountSpamBot: (id: number) =>
+    request<TelegramSpamBotCheckOut>(`/telegram-accounts/${id}/spambot/check`, { method: 'POST', body: JSON.stringify({}) }),
+
+  getTelegramAppCredentials: () => request<TelegramAppCredentials>('/telegram/app-credentials'),
+  putTelegramAppCredentials: (payload: { api_id: number; api_hash: string }) =>
+    request<TelegramAppCredentials>('/telegram/app-credentials', { method: 'PUT', body: JSON.stringify(payload) }),
   resumeInviteRun: (id: number) =>
     request<InviteRun>(`/invite-runs/${id}/resume`, { method: 'POST', body: JSON.stringify({}) }),
   cancelInviteRun: (id: number) =>

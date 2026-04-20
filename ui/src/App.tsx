@@ -20,6 +20,9 @@ const TelegramAuthPage = lazy(() => import('./pages/TelegramAuthPage').then((m) 
 const TelegramAccountsPage = lazy(() =>
   import('./pages/TelegramAccountsPage').then((m) => ({ default: m.TelegramAccountsPage })),
 )
+const TelegramAccountsStatusPage = lazy(() =>
+  import('./pages/TelegramAccountsStatusPage').then((m) => ({ default: m.TelegramAccountsStatusPage })),
+)
 
 function RouteFallback() {
   return (
@@ -79,11 +82,11 @@ function ShellNavLinks({ onNavigate }: { onNavigate: () => void }) {
         <NavLink to="/audit" className={linkCls} onClick={onNavigate}>
           Аудит
         </NavLink>
-        <NavLink to="/telegram-auth" className={linkCls} onClick={onNavigate}>
-          Telegram вход
-        </NavLink>
         <NavLink to="/telegram-accounts" className={linkCls} onClick={onNavigate}>
           Telegram аккаунты
+        </NavLink>
+        <NavLink to="/telegram-accounts/status" className={linkCls} onClick={onNavigate}>
+          Telegram статусы
         </NavLink>
       </NavBlock>
     </>
@@ -161,8 +164,9 @@ function App() {
             <Route path="/attempts" element={<AttemptsPage />} />
             <Route path="/suppression" element={<SuppressionPage />} />
             <Route path="/audit" element={<AuditPage />} />
-            <Route path="/telegram-auth" element={<TelegramAuthPage />} />
             <Route path="/telegram-accounts" element={<TelegramAccountsPage />} />
+            <Route path="/telegram-accounts/status" element={<TelegramAccountsStatusPage />} />
+            <Route path="/telegram-auth" element={<TelegramAuthPage />} />
           </Routes>
         </Suspense>
       </main>

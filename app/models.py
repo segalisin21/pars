@@ -285,6 +285,18 @@ class CandidateEmbedding(Base):
     __table_args__ = (UniqueConstraint("workspace_id", "candidate_id", name="uq_candidate_embeddings_ws_candidate"),)
 
 
+class TelegramAppCredentials(Base):
+    """Singleton: Telegram App credentials (api_id/api_hash) encrypted at rest."""
+
+    __tablename__ = "telegram_app_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    api_id_encrypted: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    api_hash_encrypted: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class TelegramAccount(Base):
     """Global pool of Telegram user sessions (not workspace-scoped)."""
 
@@ -292,6 +304,7 @@ class TelegramAccount(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     label: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    last_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     session_string_encrypted: Mapped[str] = mapped_column(String(8192), nullable=False)
     session_string_key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -303,6 +316,10 @@ class TelegramAccount(Base):
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # When set, this account should not be auto-selected until this time (e.g. after FloodWait).
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    spambot_status_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spambot_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    spambot_error: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class SuppressionList(Base):

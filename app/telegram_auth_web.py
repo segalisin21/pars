@@ -18,7 +18,12 @@ def _cleanup_expired() -> None:
             del _pending[token]
 
 
-def _get_telegram_api() -> tuple[Optional[int], Optional[str]]:
+def _get_telegram_api(api_id: Optional[int] = None, api_hash: Optional[str] = None) -> tuple[Optional[int], Optional[str]]:
+    if api_id and api_hash:
+        try:
+            return int(api_id), str(api_hash)
+        except Exception:
+            return None, None
     api_id = os.getenv("TG_API_ID") or os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TG_API_HASH") or os.getenv("TELEGRAM_API_HASH")
     if not api_id or not api_hash:
@@ -42,7 +47,7 @@ class VerifyCodeResult:
     error: str | None
 
 
-async def request_code(phone: str) -> RequestCodeResult:
+async def request_code(phone: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> RequestCodeResult:
     """
     Sends Telegram login code to the given phone.
     Returns a temporary token used for verify_code().
@@ -54,7 +59,7 @@ async def request_code(phone: str) -> RequestCodeResult:
     except Exception:
         return RequestCodeResult(token=None, error="Telethon не установлен. Установите зависимости (telethon).")
 
-    api_id, api_hash = _get_telegram_api()
+    api_id, api_hash = _get_telegram_api(api_id=api_id, api_hash=api_hash)
     if not api_id or not api_hash:
         return RequestCodeResult(token=None, error="TG_API_ID и TG_API_HASH не заданы в переменных окружения.")
 
@@ -97,7 +102,14 @@ async def request_code(phone: str) -> RequestCodeResult:
         return RequestCodeResult(token=None, error=str(e))
 
 
-async def verify_code(token: str, code: str, password: Optional[str] = None) -> VerifyCodeResult:
+async def verify_code(
+    token: str,
+    code: str,
+    password: Optional[str] = None,
+    *,
+    api_id: Optional[int] = None,
+    api_hash: Optional[str] = None,
+) -> VerifyCodeResult:
     """
     Completes sign-in by code (and optional 2FA password).
     On success returns a Telethon StringSession string to store in TG_SESSION_STRING.
@@ -114,7 +126,7 @@ async def verify_code(token: str, code: str, password: Optional[str] = None) -> 
     if not data:
         return VerifyCodeResult(False, None, "Код истёк или неверный токен. Начните заново.")
 
-    api_id, api_hash = _get_telegram_api()
+    api_id, api_hash = _get_telegram_api(api_id=api_id, api_hash=api_hash)
     if not api_id or not api_hash:
         return VerifyCodeResult(False, None, "TG_API_ID и TG_API_HASH не заданы в переменных окружения.")
 

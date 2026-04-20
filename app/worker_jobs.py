@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.db import Base
-from app.models import BroadcastRun, CollectRun, InviteRun, Source, TargetingProfile, TargetingRun, TargetingRunLog, utcnow
+from app.models import BroadcastRun, CollectRun, InviteRun, Source, TargetingProfile, TargetingRun, TargetingRunLog, TelegramAccount, utcnow
 from app.services import (
     process_broadcast_run,
     process_collect_run,
@@ -18,7 +18,7 @@ from app.services import (
 )
 from app.targeting_ai import capture_messages_for_workspace, recompute_features_for_profile
 from app.targeting_params import TargetingParamsV2
-from app.telegram_accounts_service import prepare_telegram_client_for_worker_run
+from app.telegram_accounts_service import prepare_telegram_client_for_worker_run, telethon_client_for_account
 from app.telegram_client import TelegramClient
 from app.telethon_client import TelethonTelegramClient
 
@@ -290,6 +290,38 @@ def execute_targeting_run(*, run_id: int) -> None:
         run.updated_at = utcnow()
         run.finished_at = utcnow()
         _tr_log(db, run, "done")
+        db.commit()
+    finally:
+        db.close()
+
+
+def execute_spambot_check(*, account_id: int) -> None:
+    session_factory = get_worker_session_factory()
+    db = session_factory()
+    try:
+        acc = db.get(TelegramAccount, account_id)
+        if acc is None:
+            return
+        if not acc.enabled:
+            acc.spambot_error = "disabled"
+            db.commit()
+            return
+        try:
+            tg = telethon_client_for_account(db, account_id)
+        except Exception as e:
+            logger.exception("spambot telegram client failed account_id=%s", account_id)
+            acc.spambot_error = str(e)
+            db.commit()
+            return
+
+        ok, text, err = tg.fetch_spambot_status()
+        if ok:
+            acc.spambot_status_text = text
+            acc.spambot_error = None
+            acc.spambot_checked_at = utcnow()
+        else:
+            acc.spambot_error = err or "failed"
+            acc.spambot_checked_at = utcnow()
         db.commit()
     finally:
         db.close()

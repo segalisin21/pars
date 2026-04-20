@@ -472,6 +472,21 @@ class TelegramVerifyCodeOut(BaseModel):
     error: str | None
 
 
+class TelegramAppCredentialsOut(BaseModel):
+    configured: bool
+    api_id: int | None = None
+    updated_at: datetime | None = None
+
+    @field_serializer("updated_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TelegramAppCredentialsPutIn(BaseModel):
+    api_id: int = Field(gt=0)
+    api_hash: str = Field(min_length=8, max_length=128)
+
+
 class TelegramAccountCreate(BaseModel):
     label: str = Field(default="", max_length=128)
     session_string: str = Field(min_length=1, max_length=8192)
@@ -485,6 +500,7 @@ class TelegramAccountPatch(BaseModel):
 class TelegramAccountOut(BaseModel):
     id: int
     label: str
+    last_username: str | None = None
     enabled: bool
     created_at: datetime
     last_used_at: datetime | None
@@ -506,6 +522,38 @@ class TelegramAccountTestOut(BaseModel):
     ok: bool
     username: str | None = None
     error: str | None = None
+
+
+class TelegramAccountBusyOut(BaseModel):
+    kind: str
+    run_id: int
+    status: str
+    started_at: datetime
+
+    @field_serializer("started_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TelegramAccountStatusOut(BaseModel):
+    account: TelegramAccountOut
+    busy: TelegramAccountBusyOut | None = None
+    spambot_status_text: str | None = None
+    spambot_checked_at: datetime | None = None
+    spambot_error: str | None = None
+
+    @field_serializer("spambot_checked_at")
+    def _serialize_dt(self, v: datetime | None):
+        return iso_utc_z(v)
+
+
+class TelegramAccountsStatusList(BaseModel):
+    items: list[TelegramAccountStatusOut]
+
+
+class TelegramAccountSpamBotCheckOut(BaseModel):
+    enqueued: bool
+    job_id: str | None = None
 
 
 class PageMeta(BaseModel):

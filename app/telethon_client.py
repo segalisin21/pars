@@ -114,6 +114,39 @@ class TelethonTelegramClient(TelegramClient):
             except Exception:
                 pass
 
+    def fetch_spambot_status(self) -> tuple[bool, str | None, str | None]:
+        """
+        Best-effort anti-spam status via @SpamBot.
+        Sends /start then returns the latest bot message text.
+        """
+        try:
+            from telethon.sync import TelegramClient as _TelethonClient  # type: ignore
+            from telethon.sessions import StringSession  # type: ignore
+        except Exception as e:  # pragma: no cover
+            return False, None, str(e)
+
+        client = _TelethonClient(StringSession(self._cfg.session_string), self._cfg.api_id, self._cfg.api_hash)
+        try:
+            client.connect()
+            if not client.is_user_authorized():
+                return False, None, "not_authorized"
+            client.send_message("SpamBot", "/start")
+            msgs = client.get_messages("SpamBot", limit=1)
+            if not msgs:
+                return False, None, "no_response"
+            m = msgs[0]
+            txt = getattr(m, "message", None)
+            if not isinstance(txt, str) or not txt.strip():
+                return False, None, "empty_response"
+            return True, txt.strip(), None
+        except Exception as e:
+            return False, None, type(e).__name__
+        finally:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
     def invite_to_target(self, target_identifier: str, tg_user_id: int) -> None:
         try:
             from telethon.sync import TelegramClient as _TelethonClient  # type: ignore

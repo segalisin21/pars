@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.crypto import decrypt_string, encrypt_string
 from app.models import TelegramAccount, utcnow
+from app.telegram_app_credentials_service import get_telegram_api as _get_telegram_api_from_db
 from app.telethon_client import TelethonConfig, TelethonTelegramClient
 from app.telegram_client import TelegramClient
 
@@ -58,10 +59,19 @@ def select_telegram_account(
     return db.scalar(stmt)
 
 
-def _client_from_account(acc: TelegramAccount) -> TelethonTelegramClient:
+def _client_from_account(db: Session, acc: TelegramAccount) -> TelethonTelegramClient:
     session_string = decrypt_string(acc.session_string_encrypted, key_version=acc.session_string_key_version)
-    api_id, api_hash = _get_telegram_api_from_env()
+    api_id, api_hash = _get_telegram_api(db)
     return TelethonTelegramClient(TelethonConfig(api_id=api_id, api_hash=api_hash, session_string=session_string))
+
+
+def telethon_client_for_account(db: Session, account_id: int) -> TelethonTelegramClient:
+    acc = db.get(TelegramAccount, account_id)
+    if acc is None:
+        raise RuntimeError("telegram_account_not_found")
+    if not acc.enabled:
+        raise RuntimeError("telegram_account_disabled")
+    return _client_from_account(db, acc)
 
 
 def resolve_telegram_client_for_run(
@@ -76,7 +86,7 @@ def resolve_telegram_client_for_run(
     acc = select_telegram_account(db, preferred_account_id)
     if acc is not None:
         try:
-            client = _client_from_account(acc)
+            client = _client_from_account(db, acc)
         except ValueError:
             logger.exception("telegram_account decrypt failed account_id=%s", acc.id)
             acc.last_error_code = "decrypt_failed"
@@ -122,7 +132,7 @@ def prepare_telegram_client_for_worker_run(
         if acc.cooldown_until is not None and acc.cooldown_until > now:
             raise RuntimeError("telegram_account_in_cooldown")
         try:
-            client = _client_from_account(acc)
+            client = _client_from_account(db, acc)
         except ValueError:
             acc.last_error_code = "decrypt_failed"
             acc.last_error_at = utcnow()
@@ -145,6 +155,13 @@ def _get_telegram_api_from_env() -> tuple[int, str]:
     return int(api_id), str(api_hash)
 
 
+def _get_telegram_api(db: Session) -> tuple[int, str]:
+    api_id, api_hash = _get_telegram_api_from_db(db)
+    if api_id and api_hash:
+        return int(api_id), str(api_hash)
+    return _get_telegram_api_from_env()
+
+
 def mark_account_cooldown(db: Session, account_id: int | None, until: datetime | None) -> None:
     if account_id is None or until is None:
         return
@@ -164,7 +181,7 @@ def test_telegram_account_connection(db: Session, account_id: int) -> dict:
     if acc is None:
         return {"ok": False, "error": "not_found", "username": None}
     try:
-        client = _client_from_account(acc)
+        client = _client_from_account(db, acc)
     except ValueError:
         acc.last_error_code = "decrypt_failed"
         acc.last_error_at = utcnow()
@@ -173,6 +190,7 @@ def test_telegram_account_connection(db: Session, account_id: int) -> dict:
     ok, username, err = client.verify_session()
     if ok:
         acc.last_ok_at = utcnow()
+        acc.last_username = username
         acc.last_error_code = None
     else:
         acc.last_error_code = err or "verify_failed"
