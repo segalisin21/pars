@@ -524,6 +524,19 @@ class TelegramAccountTestOut(BaseModel):
     error: str | None = None
 
 
+class TelegramInboxMessageOut(BaseModel):
+    id: int
+    date: str | None = None
+    text: str
+    out: bool = False
+
+
+class TelegramInboxOut(BaseModel):
+    peer: str
+    items: list[TelegramInboxMessageOut]
+    error: str | None = None
+
+
 class TelegramAccountBusyOut(BaseModel):
     kind: str
     run_id: int

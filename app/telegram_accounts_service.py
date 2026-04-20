@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.crypto import decrypt_string, encrypt_string
 from app.models import TelegramAccount, utcnow
 from app.telegram_app_credentials_service import get_telegram_api as _get_telegram_api_from_db
-from app.telethon_client import TelethonConfig, TelethonTelegramClient
+from app.telethon_client import TelethonConfig, TelethonTelegramClient, async_fetch_inbox_text, async_verify_session
 from app.telegram_client import TelegramClient
 
 logger = logging.getLogger(__name__)
@@ -197,3 +197,56 @@ def test_telegram_account_connection(db: Session, account_id: int) -> dict:
         acc.last_error_at = utcnow()
     db.flush()
     return {"ok": ok, "error": err, "username": username}
+
+
+async def test_telegram_account_connection_async(db: Session, account_id: int) -> dict:
+    """
+    Async verify session with Telegram using Telethon async API.
+    Avoids telethon.sync coroutine warnings inside async web servers.
+    """
+    acc = db.get(TelegramAccount, account_id)
+    if acc is None:
+        return {"ok": False, "error": "not_found", "username": None}
+    try:
+        session_string = decrypt_string(acc.session_string_encrypted, key_version=acc.session_string_key_version)
+    except ValueError:
+        acc.last_error_code = "decrypt_failed"
+        acc.last_error_at = utcnow()
+        db.flush()
+        return {"ok": False, "error": "decrypt_failed", "username": None}
+
+    api_id, api_hash = _get_telegram_api(db)
+    ok, username, err = await async_verify_session(TelethonConfig(api_id=api_id, api_hash=api_hash, session_string=session_string))
+    if ok:
+        acc.last_ok_at = utcnow()
+        acc.last_username = username
+        acc.last_error_code = None
+    else:
+        acc.last_error_code = err or "verify_failed"
+        acc.last_error_at = utcnow()
+    db.flush()
+    return {"ok": ok, "error": err, "username": username}
+
+
+async def fetch_telegram_account_inbox_async(
+    db: Session,
+    *,
+    account_id: int,
+    peer: str,
+    limit: int = 20,
+) -> dict:
+    acc = db.get(TelegramAccount, account_id)
+    if acc is None:
+        return {"ok": False, "error": "not_found", "items": []}
+    try:
+        session_string = decrypt_string(acc.session_string_encrypted, key_version=acc.session_string_key_version)
+    except ValueError:
+        return {"ok": False, "error": "decrypt_failed", "items": []}
+
+    api_id, api_hash = _get_telegram_api(db)
+    ok, items, err = await async_fetch_inbox_text(
+        TelethonConfig(api_id=api_id, api_hash=api_hash, session_string=session_string),
+        peer=peer,
+        limit=limit,
+    )
+    return {"ok": ok, "error": err, "items": items}

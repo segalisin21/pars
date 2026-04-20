@@ -136,3 +136,30 @@ def test_telegram_accounts_spambot_check_enqueues(monkeypatch, session_factory, 
     assert r.status_code == 200
     assert r.json()["enqueued"] is True
     assert r.json()["job_id"] == "job123"
+
+
+def test_telegram_accounts_inbox_returns_items(monkeypatch, session_factory, fake_tg):
+    tok = "d" * 32
+    monkeypatch.setenv("ADMIN_TOKEN", tok)
+    app = create_app(session_factory=session_factory, tg_client=fake_tg)
+    client = TestClient(app)
+    h = {"Authorization": f"Bearer {tok}"}
+
+    acc = client.post("/telegram-accounts", json={"label": "acc", "session_string": "s" * 30}, headers=h).json()
+
+    async def _fake_fetch(db, *, account_id: int, peer: str, limit: int = 20):
+        _ = db
+        _ = limit
+        assert account_id == acc["id"]
+        assert peer == "777000"
+        return {"ok": True, "error": None, "items": [{"id": 1, "date": None, "text": "code 12345", "out": False}]}
+
+    import app.routers.telegram_accounts as ta
+
+    monkeypatch.setattr(ta, "fetch_telegram_account_inbox_async", _fake_fetch)
+
+    r = client.get(f"/telegram-accounts/{acc['id']}/inbox?peer=777000&limit=5", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["peer"] == "777000"
+    assert body["items"][0]["text"] == "code 12345"

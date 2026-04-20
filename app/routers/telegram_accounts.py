@@ -17,9 +17,10 @@ from app.schemas import (
     TelegramAccountsList,
     TelegramAccountsStatusList,
     TelegramAccountTestOut,
+    TelegramInboxOut,
 )
 from app.worker_jobs import execute_spambot_check
-from app.telegram_accounts_service import create_telegram_account, test_telegram_account_connection
+from app.telegram_accounts_service import create_telegram_account, fetch_telegram_account_inbox_async, test_telegram_account_connection_async
 
 
 def _account_out(acc: TelegramAccount) -> TelegramAccountOut:
@@ -180,7 +181,7 @@ def make_telegram_accounts_router(ctx: RouteContext) -> APIRouter:
         return None
 
     @router.post("/telegram-accounts/{account_id}/test", response_model=TelegramAccountTestOut)
-    def test_account(
+    async def test_account(
         account_id: int,
         db: Session = Depends(get_db),
         _auth=Depends(verify_admin_token),
@@ -191,9 +192,26 @@ def make_telegram_accounts_router(ctx: RouteContext) -> APIRouter:
                 status_code=404,
                 detail={"error": {"code": "not_found", "message": "Telegram account not found", "details": {"id": account_id}}},
             )
-        r = test_telegram_account_connection(db, account_id)
+        r = await test_telegram_account_connection_async(db, account_id)
         db.commit()
         return TelegramAccountTestOut(ok=bool(r.get("ok")), username=r.get("username"), error=r.get("error"))
+
+    @router.get("/telegram-accounts/{account_id}/inbox", response_model=TelegramInboxOut)
+    async def account_inbox(
+        account_id: int,
+        peer: str = "777000",
+        limit: int = 20,
+        db: Session = Depends(get_db),
+        _auth=Depends(verify_admin_token),
+    ):
+        acc = db.get(TelegramAccount, account_id)
+        if acc is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "not_found", "message": "Telegram account not found", "details": {"id": account_id}}},
+            )
+        r = await fetch_telegram_account_inbox_async(db, account_id=account_id, peer=peer, limit=limit)
+        return TelegramInboxOut(peer=peer, items=r.get("items") or [], error=r.get("error"))
 
     @router.post("/telegram-accounts/{account_id}/spambot/check", response_model=TelegramAccountSpamBotCheckOut)
     def spambot_check(

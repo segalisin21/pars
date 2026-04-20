@@ -187,6 +187,9 @@ export type TelegramAccountsStatusList = { items: TelegramAccountStatus[] }
 
 export type TelegramSpamBotCheckOut = { enqueued: boolean; job_id: string | null }
 
+export type TelegramInboxMessage = { id: number; date: string | null; text: string; out: boolean }
+export type TelegramInboxOut = { peer: string; items: TelegramInboxMessage[]; error: string | null }
+
 export type TelegramRequestCodeOut = {
   token: string | null
   error: string | null
@@ -433,6 +436,13 @@ export const api = {
   listTelegramAccountsStatus: () => request<TelegramAccountsStatusList>('/telegram-accounts/status'),
   checkTelegramAccountSpamBot: (id: number) =>
     request<TelegramSpamBotCheckOut>(`/telegram-accounts/${id}/spambot/check`, { method: 'POST', body: JSON.stringify({}) }),
+  getTelegramAccountInbox: (id: number, params?: { peer?: string; limit?: number }) => {
+    const sp = new URLSearchParams()
+    if (params?.peer) sp.set('peer', params.peer)
+    if (params?.limit !== undefined) sp.set('limit', String(params.limit))
+    const qs = sp.toString()
+    return request<TelegramInboxOut>(`/telegram-accounts/${id}/inbox${qs ? `?${qs}` : ''}`)
+  },
 
   getTelegramAppCredentials: () => request<TelegramAppCredentials>('/telegram/app-credentials'),
   putTelegramAppCredentials: (payload: { api_id: number; api_hash: string }) =>

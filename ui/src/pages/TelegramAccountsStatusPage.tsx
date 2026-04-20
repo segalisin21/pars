@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, apiBaseUrl, type TelegramAccountStatus } from '../lib/api'
+import { api, apiBaseUrl, type TelegramAccountStatus, type TelegramInboxMessage } from '../lib/api'
 import { PageLayout } from '../components/PageLayout'
 import { UiBanner } from '../components/UiBanner'
 import { SkeletonBlock } from '../components/SkeletonBlock'
@@ -14,6 +14,9 @@ export function TelegramAccountsStatusPage() {
   const [items, setItems] = useState<TelegramAccountStatus[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [actionBusyId, setActionBusyId] = useState<number | null>(null)
+  const [inboxAccountId, setInboxAccountId] = useState<number | null>(null)
+  const [inboxPeer, setInboxPeer] = useState('777000')
+  const [inboxItems, setInboxItems] = useState<TelegramInboxMessage[] | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -52,6 +55,23 @@ export function TelegramAccountsStatusPage() {
       await load()
     } catch (e) {
       setErr(formatApiError(e).message)
+    } finally {
+      setActionBusyId(null)
+    }
+  }
+
+  async function loadInbox(id: number) {
+    setActionBusyId(id)
+    setErr(null)
+    setInboxAccountId(id)
+    setInboxItems(null)
+    try {
+      const r = await api.getTelegramAccountInbox(id, { peer: inboxPeer, limit: 20 })
+      if (r.error) setErr(r.error)
+      setInboxItems(r.items)
+    } catch (e) {
+      setErr(formatApiError(e).message)
+      setInboxItems(null)
     } finally {
       setActionBusyId(null)
     }
@@ -123,12 +143,45 @@ export function TelegramAccountsStatusPage() {
                     <button
                       type="button"
                       className="btn"
+                      onClick={() => void loadInbox(a.id)}
+                      disabled={actionBusyId === a.id || !a.enabled}
+                    >
+                      {actionBusyId === a.id ? '…' : 'Входящие'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
                       onClick={() => void checkSpamBot(a.id)}
                       disabled={actionBusyId === a.id || !a.enabled}
                     >
                       {actionBusyId === a.id ? '…' : 'Проверить @SpamBot'}
                     </button>
                   </div>
+
+                  {inboxAccountId === a.id ? (
+                    <div style={{ marginTop: 10 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <label className="field grow">
+                          <div className="label">Peer</div>
+                          <input value={inboxPeer} onChange={(e) => setInboxPeer(e.target.value)} placeholder="777000 / SpamBot / @username" />
+                        </label>
+                        <button type="button" className="btn" onClick={() => void loadInbox(a.id)} disabled={actionBusyId === a.id}>
+                          Обновить входящие
+                        </button>
+                      </div>
+                      <div className="mono small" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                        {inboxItems === null
+                          ? 'Загрузка…'
+                          : inboxItems.length === 0
+                            ? 'Нет сообщений.'
+                            : inboxItems
+                                .slice()
+                                .reverse()
+                                .map((m) => `${m.date ?? '—'} ${m.out ? 'OUT' : 'IN'}: ${m.text}`)
+                                .join('\n\n')}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )
             })}
